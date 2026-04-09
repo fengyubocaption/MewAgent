@@ -51,3 +51,20 @@ class MilvusWriter:
             ]
 
             self.milvus_manager.insert(insert_data)
+
+    def delete_document_chunks(self, filename: str) -> dict:
+        """删除文档的完整生命周期：先扣减 BM25，再删向量"""
+        # 1. 先查出原文
+        rows = self.milvus_manager.query_all(
+            filter_expr=f'filename == "{filename}"',
+            output_fields=["text"],
+        )
+        texts = [r.get("text") or "" for r in rows]
+
+        if texts:
+            # 2. 扣减 BM25 统计
+            self.embedding_service.increment_remove_documents(texts)
+
+        # 3. 真正执行 Milvus 删除
+        result = self.milvus_manager.delete(f'filename == "{filename}"')
+        return result

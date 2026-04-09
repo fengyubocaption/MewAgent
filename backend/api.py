@@ -45,16 +45,6 @@ milvus_writer = MilvusWriter(embedding_service=embedding_service, milvus_manager
 router = APIRouter()
 
 
-def _remove_bm25_stats_for_filename(filename: str) -> None:
-    """删除 Milvus 中该文件对应 chunk 前，先从持久化 BM25 统计中扣减。"""
-    rows = milvus_manager.query_all(
-        filter_expr=f'filename == "{filename}"',
-        output_fields=["text"],
-    )
-    texts = [r.get("text") or "" for r in rows]
-    embedding_service.increment_remove_documents(texts)
-
-
 @router.post("/auth/register", response_model=AuthResponse)
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     username = (request.username or "").strip()
@@ -221,6 +211,7 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         if not filename:
             raise HTTPException(status_code=400, detail="文件名不能为空")
         if not (
+            # TODO: 支持md、txt等类型文档
             file_lower.endswith(".pdf")
             or file_lower.endswith((".docx", ".doc"))
             or file_lower.endswith((".xlsx", ".xls"))
@@ -230,16 +221,8 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         milvus_manager.init_collection()
 
-        delete_expr = f'filename == "{filename}"'
         try:
-            _remove_bm25_stats_for_filename(filename)
-        except Exception:
-            pass
-        try:
-            milvus_manager.delete(delete_expr)
-        except Exception:
-            pass
-        try:
+            milvus_writer.delete_document_chunks(filename)
             parent_chunk_store.delete_by_filename(filename)
         except Exception:
             pass
@@ -282,12 +265,12 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
 @router.delete("/documents/{filename}", response_model=DocumentDeleteResponse)
 async def delete_document(filename: str, _: User = Depends(require_admin)):
     """删除文档在 Milvus 中的向量（保留本地文件，管理员）"""
-    try:
-        milvus_manager.init_collection()
+    milvus_manager.init_collection()
 
-        delete_expr = f'filename == "{filename}"'
-        _remove_bm25_stats_for_filename(filename)
-        result = milvus_manager.delete(delete_expr)
+    try:
+        result = milvus_writer.delete_document_chunks(filename)
+
+        # 删除 PostgreSQL 中的关系型结构（L1/L2 父分块）
         parent_chunk_store.delete_by_filename(filename)
 
         return DocumentDeleteResponse(
