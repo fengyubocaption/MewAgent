@@ -16,3 +16,7 @@ volumes/
 # OS files
 .DS_Store
 data/
+
+# JetBrains IDE settings
+.idea/
+*.iml
