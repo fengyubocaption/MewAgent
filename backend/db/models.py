@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.database import Base
+from backend.db.database import Base
 
 
 class User(Base):
@@ -60,3 +60,20 @@ class ParentChunk(Base):
     chunk_level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     chunk_idx: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class _LangMemMemory(Base):
+    """LangMem 长期记忆存储表。"""
+
+    __tablename__ = "langmem_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    namespace: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at = mapped_column(DateTime, server_default=text("NOW()"))
+    updated_at = mapped_column(DateTime, server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("ix_langmem_ns_key", "namespace", "key"),
+    )

@@ -7,15 +7,15 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from agent.agent import chat_with_agent, chat_with_agent_stream, storage
-from routes.auth import authenticate_user, create_access_token, get_current_user, get_db, get_password_hash, require_admin, resolve_role
-from milvus.document_loader import DocumentLoader
-from milvus.embedding import embedding_service
-from milvus.milvus_client import MilvusManager
-from milvus.milvus_writer import MilvusWriter
-from db.models import User
-from milvus.parent_chunk_store import ParentChunkStore
-from routes.schemas import (
+from backend.agent.agent import chat_with_agent, chat_with_agent_stream, storage
+from backend.routes.auth import authenticate_user, create_access_token, get_current_user, get_db, get_password_hash, require_admin, resolve_role
+from backend.rag.document_loader import DocumentLoader
+from backend.milvus.embedding import embedding_service
+from backend.milvus.milvus_client import MilvusManager
+from backend.milvus.milvus_writer import MilvusWriter
+from backend.db.models import User
+from backend.rag.parent_chunk_store import ParentChunkStore
+from backend.routes.schemas import (
     AuthResponse,
     ChatRequest,
     ChatResponse,
@@ -33,7 +33,7 @@ from routes.schemas import (
     SessionMessagesResponse,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR.parent / "data"
 UPLOAD_DIR = DATA_DIR / "documents"
 

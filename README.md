@@ -150,7 +150,7 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 
 1. 先做文档结构解析，按文档结构做粗拆分，再用递归字符分块兜底，保证打的主题单元不被拆分（2000-3000token）；再用语义分块做精细化拆分，控制单块大小（512-1024token）
 2. 代码块、表格、图片特殊处理
-3. 实现 ParentDocument/Auto-merging Retriever 策略 --done
+3. ~~实现 ParentDocument/Auto-merging Retriever 策略~~ --done
 
 #### 召回层
 
@@ -173,7 +173,7 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ### 其他能力拓展
 
 1. 开发 SQL assistant Skill
-2. 实现暂停功能与人工介入机制 --done
+2. ~~实现暂停功能与人工介入机制~~ --done
 3. 新增问题类型判断，简单问题跳过复杂处理流程
 4. 扩展网络搜索能力
 5. 支持多步骤规划与任务并行执行

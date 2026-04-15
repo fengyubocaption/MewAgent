@@ -64,6 +64,7 @@ def emit_rag_step(icon: str, label: str, detail: str = ""):
             pass
 
 
+@tool("get_current_weather")
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:
     """获取天气信息"""
     if not location:

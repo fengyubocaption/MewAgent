@@ -6,12 +6,12 @@ import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
-from agent.tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
+from backend.agent.tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
 from datetime import datetime
-from db.cache import cache
-from db.database import SessionLocal
-from db.models import User, ChatSession, ChatMessage
-from milvus.memory_manager import create_memory_tools, extract_conversation_memories, get_user_memories
+from backend.db.cache import cache
+from backend.db.database import SessionLocal
+from backend.db.models import User, ChatSession, ChatMessage
+from backend.agent.memory_manager import create_memory_tools, extract_conversation_memories, get_user_memories
 
 load_dotenv()
 
