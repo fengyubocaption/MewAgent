@@ -23,3 +23,4 @@ data/
 
 # Claude files
 CLAUDE.md
+.claude/
