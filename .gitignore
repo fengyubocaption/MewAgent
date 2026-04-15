@@ -20,3 +20,6 @@ data/
 # JetBrains IDE settings
 .idea/
 *.iml
+
+# Claude files
+CLAUDE.md

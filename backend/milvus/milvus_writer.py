@@ -1,6 +1,6 @@
 """文档向量化并写入 Milvus - 支持密集+稀疏向量"""
-from embedding import EmbeddingService, embedding_service as _default_embedding_service
-from milvus_client import MilvusManager
+from milvus.embedding import EmbeddingService, embedding_service as _default_embedding_service
+from milvus.milvus_client import MilvusManager
 
 
 class MilvusWriter:
@@ -54,6 +54,8 @@ class MilvusWriter:
 
     def delete_document_chunks(self, filename: str) -> dict:
         """删除文档的完整生命周期：先扣减 BM25，再删向量"""
+        self.milvus_manager.init_collection()
+
         # 1. 先查出原文
         rows = self.milvus_manager.query_all(
             filter_expr=f'filename == "{filename}"',

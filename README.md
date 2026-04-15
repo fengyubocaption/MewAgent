@@ -136,6 +136,7 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 - **三级分块 + Auto-merging**：L1/L2/L3 三层滑窗切分；检索时优先召回 L3，满足阈值后自动合并到父块（L3->L2->L1）。
 - **Leaf-only 向量化存储**：仅叶子分块写入 Milvus，父块写入 DocStore，减少向量冗余并保留上下文聚合能力。
 - **工具可扩展**：天气查询示例 + 知识库检索，便于按需增添第三方 API 或企业数据源。
+- **LangMem 长期记忆**：集成 LangChain 官方 LangMem SDK，实现三类长期记忆（用户画像、会话摘要、程序经验）。替代旧的"前 40 条消息压缩"逻辑，通过后台异步提取 + PostgreSQL 持久化，记忆跨会话保留，Agent 可在对话中主动存储和检索用户记忆。
 - **RAG 过程可观测**：记录检索、评分、重写与来源信息，前端可展开查看每一步细节。
 - **查询重写体系**：Step-Back 与 HyDE 两种扩展方式 + 路由选择，必要时触发重写检索。
 - **相关性评分门控**：基于结构化输出的 `grade_documents` 判断是否需要重写检索。
@@ -177,7 +178,7 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 4. 扩展网络搜索能力
 5. 支持多步骤规划与任务并行执行
 6. 搭建路由器节点，由 LLM 自主判断下一步动作
-7. 优化 memory 管理：集成 MemO、LangMem 等方案
+7. ~~优化 memory 管理~~：已集成 LangMem，实现用户画像、会话摘要、程序经验三类长期记忆 --done
 8. multi-agent：工具过多，把工具拆分给职责明确的专业化agent，提升工具选择的准确性和整体稳定性
 9. 历史记录会话名称可修改
 10. 死循环检测与恢复：_is_stuck + attempt_loop_recovery
@@ -209,20 +210,28 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 
 ## 目录与架构
 - 后端：`backend/`
+  - `routes/` — API 路由层
+    - [api.py](backend/routes/api.py)：聊天、会话管理、文档管理接口。
+    - [auth.py](backend/routes/auth.py)：注册登录、JWT 鉴权、权限检查、密码哈希与校验。
+    - [schemas.py](backend/routes/schemas.py)：Pydantic 请求/响应模型。
+  - `db/` — 数据库与缓存层
+    - [database.py](backend/db/database.py)：数据库引擎与会话工厂、建表入口。
+    - [models.py](backend/db/models.py)：ORM 模型定义（用户、会话、消息、父文档）。
+    - [cache.py](backend/db/cache.py)：Redis JSON 缓存封装。
+  - `agent/` — Agent 与工具层
+    - [agent.py](backend/agent/agent.py)：LangChain Agent、会话存储、LangMem 长期记忆。
+    - [tools.py](backend/agent/tools.py)：天气查询、知识库检索工具。
+  - `rag/` — RAG 检索层
+    - [rag_pipeline.py](backend/rag/rag_pipeline.py)：RAG 工作流（检索 → 评分 → 重写 → 再检索），基于 LangGraph 编排。
+    - [rag_utils.py](backend/rag/rag_utils.py)：检索、Rerank、Auto-merging、Step-back、HyDE 等辅助函数。
+  - `milvus/` — 向量存储与文档处理层
+    - [milvus_client.py](backend/milvus/milvus_client.py)：Milvus 集合定义、混合检索（dense+sparse+RRF）、分页查询。
+    - [milvus_writer.py](backend/milvus/milvus_writer.py)：向量写入（稠密+稀疏）。
+    - [embedding.py](backend/milvus/embedding.py)：本地 HuggingFace 稠密向量（默认 `BAAI/bge-m3`）+ BM25 稀疏向量；BM25 状态持久化与增量更新。
+    - [document_loader.py](backend/milvus/document_loader.py)：PDF/Word/Excel 加载与三级分片。
+    - [parent_chunk_store.py](backend/milvus/parent_chunk_store.py)：父级分块仓储（PostgreSQL + Redis，用于 Auto-merging 回取父块）。
+    - [memory_manager.py](backend/milvus/memory_manager.py)：LangMem 记忆管理（长期记忆存储、提取、检索）。
   - [app.py](backend/app.py)：FastAPI 入口、CORS、静态资源挂载。
-  - [api.py](backend/api.py)：聊天、会话管理、文档管理接口。
-  - [auth.py](backend/auth.py)：注册登录、JWT 鉴权、权限检查、密码哈希与校验。
-  - [database.py](backend/database.py)：数据库引擎与会话工厂、建表入口。
-  - [models.py](backend/models.py)：ORM 模型定义（用户、会话、消息、父文档）。
-  - [cache.py](backend/cache.py)：Redis JSON 缓存封装。
-  - [agent.py](backend/agent.py)：LangChain Agent、会话存储、摘要逻辑。
-  - [tools.py](backend/tools.py)：天气查询、知识库检索工具。
-  - [embedding.py](backend/embedding.py)：本地 HuggingFace 稠密向量（默认 `BAAI/bge-m3`）+ BM25 稀疏向量；BM25 状态持久化与增量更新。
-  - [document_loader.py](backend/document_loader.py)：PDF/Word 加载与分片。
-  - [parent_chunk_store.py](backend/parent_chunk_store.py)：父级分块仓储（PostgreSQL + Redis，用于 Auto-merging 回取父块）。
-  - [milvus_writer.py](backend/milvus_writer.py)：向量写入（稠密+稀疏）。
-  - [milvus_client.py](backend/milvus_client.py)：Milvus 集合定义、混合检索；`query_all` 分页查询（单次 `query` 的 `limit` 受服务端上限约束，删除前拉全量 chunk 文本时使用）。
-  - [schemas.py](backend/schemas.py)：Pydantic 请求/响应模型。
 - 前端：`frontend/`
   - [index.html](frontend/index.html) + [script.js](frontend/script.js) + [style.css](frontend/style.css)：Vue 3 + marked + highlight.js，提供聊天、历史会话、文档上传/删除界面。
 - 数据：`data/`
@@ -477,6 +486,15 @@ StreamingResponse(
 - **即时止损原理**：`agent_task.cancel()` 会立即在任务挂起点注入 `asyncio.CancelledError`。对于流式 LLM 请求，这会触发 `httpx` 关闭 TCP 连接。服务端（OpenAI 等）检测到 client 掉线后会立即停止推理，从而实现**真正的 Token 节省**。
 
 ## 更新日志
+
+### 2026-04-15 LangMem 长期记忆集成 + 后端目录重构
+- **LangMem 记忆管理**：集成 LangChain 官方 LangMem SDK，替代旧的"前 40 条消息压缩"逻辑。
+  - 三类长期记忆：用户画像（Semantic）、会话摘要（Episodic）、程序经验（Procedural）。
+  - 后台异步记忆提取（`asyncio.ensure_future`），不阻塞聊天响应。
+  - 记忆跨会话保留，Agent 可在对话中主动存储和检索用户记忆（`manage_memory` / `search_memory` 工具）。
+  - 基于 SQLAlchemy 的自定义 `_SQLAlchemyStore`，记忆持久化到 PostgreSQL。
+- **后端目录重构**：将 `backend/` 下的 flat 文件拆分为按领域组织的子目录：
+  - `routes/`（api/auth/schemas）、`db/`（database/models/cache）、`agent/`（agent/tools）、`rag/`（rag_pipeline/rag_utils）、`milvus/`（milvus_client/milvus_writer/embedding/document_loader/parent_chunk_store/memory_manager）。
 
 ### 2026-04-08 本地嵌入与 BM25 持久化
 - **稠密向量**：由兼容 API 改为 `langchain_huggingface` 本地模型（默认 `BAAI/bge-m3`），支持 `EMBEDDING_MODEL` / `EMBEDDING_DEVICE`；Milvus `dense_embedding` 维度与 `DENSE_EMBEDDING_DIM` 对齐（默认 1024）。

@@ -7,15 +7,15 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from agent import chat_with_agent, chat_with_agent_stream, storage
-from auth import authenticate_user, create_access_token, get_current_user, get_db, get_password_hash, require_admin, resolve_role
-from document_loader import DocumentLoader
-from embedding import embedding_service
-from milvus_client import MilvusManager
-from milvus_writer import MilvusWriter
-from models import User
-from parent_chunk_store import ParentChunkStore
-from schemas import (
+from agent.agent import chat_with_agent, chat_with_agent_stream, storage
+from routes.auth import authenticate_user, create_access_token, get_current_user, get_db, get_password_hash, require_admin, resolve_role
+from milvus.document_loader import DocumentLoader
+from milvus.embedding import embedding_service
+from milvus.milvus_client import MilvusManager
+from milvus.milvus_writer import MilvusWriter
+from db.models import User
+from milvus.parent_chunk_store import ParentChunkStore
+from routes.schemas import (
     AuthResponse,
     ChatRequest,
     ChatResponse,
@@ -177,8 +177,6 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
 async def list_documents(_: User = Depends(require_admin)):
     """获取已上传的文档列表（管理员）"""
     try:
-        milvus_manager.init_collection()
-
         results = milvus_manager.query(
             output_fields=["filename", "file_type"],
             limit=10000,
@@ -219,7 +217,6 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
             raise HTTPException(status_code=400, detail="仅支持 PDF、Word 和 Excel 文档")
 
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-        milvus_manager.init_collection()
 
         try:
             milvus_writer.delete_document_chunks(filename)
@@ -265,8 +262,6 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
 @router.delete("/documents/{filename}", response_model=DocumentDeleteResponse)
 async def delete_document(filename: str, _: User = Depends(require_admin)):
     """删除文档在 Milvus 中的向量（保留本地文件，管理员）"""
-    milvus_manager.init_collection()
-
     try:
         result = milvus_writer.delete_document_chunks(filename)
 

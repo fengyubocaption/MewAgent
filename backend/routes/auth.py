@@ -9,8 +9,8 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from database import SessionLocal
-from models import User
+from db.database import SessionLocal
+from db.models import User
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")

@@ -33,6 +33,9 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.3.0",
     "langsmith>=0.7.22",
+    "langmem>=0.0.30",
+    "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
 ]
 
 [project.optional-dependencies]

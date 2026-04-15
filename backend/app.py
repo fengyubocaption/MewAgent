@@ -4,8 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import os
 
-import api as api_module
-from database import init_db
+from routes import api as api_module
+from db.database import init_db
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
