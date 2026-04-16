@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from langmem import create_manage_memory_tool, create_search_memory_tool, create_memory_manager
+from langmem.knowledge.extraction import Memory
 
 load_dotenv()
 
@@ -114,8 +115,7 @@ class _SQLAlchemyStore(BaseStore):
                 .first()
             )
             if record:
-                record.value = json.dumps(value, ensure_ascii=False)
-                record.updated_at = None
+                # 直接用原生 SQL 更新，确保 updated_at 由数据库刷新
                 db.execute(
                     text(
                         "UPDATE langmem_memories SET value = :val, updated_at = NOW() "
@@ -272,7 +272,13 @@ def extract_conversation_memories(messages: list, user_id: str) -> list:
         提取的记忆条目列表
     """
     model = _create_chat_model()
-    manager = create_memory_manager(model)
+    # 启用插入、更新和删除
+    manager = create_memory_manager(
+        model,
+        enable_inserts=True,
+        enable_updates=True,
+        enable_deletes=True,
+    )
 
     # 转换为 LangMem 期望的格式
     langmem_messages = []
@@ -280,25 +286,37 @@ def extract_conversation_memories(messages: list, user_id: str) -> list:
         role = "user" if getattr(msg, "type", None) == "human" else "assistant"
         langmem_messages.append({"role": role, "content": str(msg.content)})
 
-    # 获取该用户已有记忆（用于增量更新）
+    # 获取该用户已有记忆，转换为 LangMem 期望的格式: list[tuple[str, Memory]]
     store = get_store()
-    existing = store.search(("memories", user_id), limit=50)
+    existing_items = store.search(("memories", user_id), limit=50)
+    existing = [
+        (item.key, Memory(content=item.value.get("content", "")))
+        for item in existing_items
+        if item.value.get("content")
+    ]
 
     # 执行提取
     result = manager.invoke({
         "messages": langmem_messages,
-        "existing_memories": existing,
+        "existing": existing,  # 字段名是 existing，不是 existing_memories
     })
 
     # 存储提取结果
     for memory in result:
-        if hasattr(memory, "content") and hasattr(memory, "memory_id"):
-            # 新提取的记忆
-            key = memory.memory_id or f"mem_{hash(memory.content) & 0xFFFFFFFF:08x}"
+        # memory 是 ExtractedMemory(id=str, content=Memory | None)
+        key = memory.id
+
+        if memory.content is None:
+            # content 为 None 表示删除该记忆
+            store.delete(("memories", user_id, "extracted"), key)
+            logger.debug("删除记忆: user=%s, key=%s", user_id, key)
+        else:
+            # 新增或更新记忆
+            content = memory.content.content  # Memory 模型的 content 字段
             store.put(
                 ("memories", user_id, "extracted"),
                 key,
-                {"content": memory.content, "kind": getattr(memory, "kind", "semantic")},
+                {"content": content, "kind": "semantic"},
             )
 
     return result
@@ -324,7 +342,8 @@ def get_user_memories(user_id: str, query: str = "") -> str:
 
     parts = ["以下为该用户的长期记忆（跨会话保留）："]
     for item in memories:
-        value = item.get("value", {})
+        # item 是 SearchItem，.value 是 dict
+        value = item.value
         if isinstance(value, dict):
             content = value.get("content", str(value))
         else:

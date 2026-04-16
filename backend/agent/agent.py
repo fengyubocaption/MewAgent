@@ -317,8 +317,18 @@ def _schedule_memory_extraction(user_id: str, messages: list):
         except Exception as e:
             logger.warning("记忆提取失败: %s", e)
 
-    # 在后台运行，不阻塞主流程
-    asyncio.ensure_future(_extract())
+    # 检查是否有运行中的事件循环
+    try:
+        loop = asyncio.get_running_loop()
+        # 有活跃的事件循环，使用 ensure_future
+        asyncio.ensure_future(_extract(), loop=loop)
+    except RuntimeError:
+        # 没有运行中的事件循环，创建新的事件循环
+        # 这种情况发生在同步调用 chat_with_agent 时
+        try:
+            asyncio.run(_extract())
+        except Exception as e:
+            logger.warning("记忆提取失败（无事件循环）: %s", e)
 
 
 def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
