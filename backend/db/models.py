@@ -62,7 +62,7 @@ class ParentChunk(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class _LangMemMemory(Base):
+class LangMemMemory(Base):
     """LangMem 长期记忆存储表。"""
 
     __tablename__ = "langmem_memories"
