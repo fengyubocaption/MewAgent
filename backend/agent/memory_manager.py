@@ -105,6 +105,11 @@ class _SQLAlchemyStore(BaseStore):
 
     def _put(self, namespace: tuple, key: str, value: dict) -> None:
         ns = self._ns_to_str(namespace)
+        # 从 namespace 解析 memory_type: ("memories", user_id, memory_type)
+        memory_type = "user"  # 默认值
+        if isinstance(namespace, tuple) and len(namespace) >= 3:
+            memory_type = namespace[2]
+
         from backend.db.database import SessionLocal
 
         db = SessionLocal()
@@ -118,15 +123,16 @@ class _SQLAlchemyStore(BaseStore):
                 # 直接用原生 SQL 更新，确保 updated_at 由数据库刷新
                 db.execute(
                     text(
-                        "UPDATE langmem_memories SET value = :val, updated_at = NOW() "
+                        "UPDATE langmem_memories SET value = :val, memory_type = :mt, updated_at = NOW() "
                         "WHERE namespace = :ns AND key = :key"
                     ),
-                    {"val": json.dumps(value, ensure_ascii=False), "ns": ns, "key": key},
+                    {"val": json.dumps(value, ensure_ascii=False), "mt": memory_type, "ns": ns, "key": key},
                 )
             else:
                 db.add(
                     LangMemMemory(
-                        namespace=ns, key=key, value=json.dumps(value, ensure_ascii=False)
+                        namespace=ns, key=key, value=json.dumps(value, ensure_ascii=False),
+                        memory_type=memory_type
                     )
                 )
             db.commit()
@@ -172,16 +178,22 @@ class _SQLAlchemyStore(BaseStore):
     def _search(self, namespace_prefix: tuple, query: str | None, limit: int) -> list[SearchItem]:
         """基于命名空间前缀匹配 + 全文字符串扫描。"""
         ns = self._ns_to_str(namespace_prefix)
+
+        # 判断是否指定了 memory_type: ("memories", user_id, memory_type) vs ("memories", user_id)
+        filter_by_type = len(namespace_prefix) >= 3
+        memory_type_filter = namespace_prefix[2] if filter_by_type else None
+
         from backend.db.database import SessionLocal
 
         db = SessionLocal()
         try:
-            records = (
-                db.query(LangMemMemory)
-                .filter(LangMemMemory.namespace.like(f"{ns}%"))
-                .limit(limit)
-                .all()
-            )
+            q = db.query(LangMemMemory).filter(LangMemMemory.namespace.like(f"{ns}%"))
+
+            # 如果指定了 memory_type，额外过滤
+            if memory_type_filter:
+                q = q.filter(LangMemMemory.memory_type == memory_type_filter)
+
+            records = q.limit(limit).all()
             results = []
             for r in records:
                 item = SearchItem(
@@ -322,11 +334,12 @@ def extract_conversation_memories(messages: list, user_id: str) -> list:
     return result
 
 
-def get_user_memories(user_id: str, query: str = "") -> str:
+def get_user_memories(user_id: str, memory_type: str | None = None, query: str = "") -> str:
     """获取用户的长期记忆，格式化为可注入系统提示的文本。
 
     Args:
         user_id: 用户标识
+        memory_type: 可选，限定类型 (user/feedback/project/reference)
         query: 可选查询词，用于过滤相关记忆
 
     Returns:
@@ -334,8 +347,14 @@ def get_user_memories(user_id: str, query: str = "") -> str:
     """
     store = get_store()
 
+    # 构建命名空间前缀
+    if memory_type:
+        ns = ("memories", user_id, memory_type)
+    else:
+        ns = ("memories", user_id)
+
     # 搜索相关记忆
-    memories = store.search(("memories", user_id), query=query, limit=20)
+    memories = store.search(ns, query=query, limit=20)
 
     if not memories:
         return ""
