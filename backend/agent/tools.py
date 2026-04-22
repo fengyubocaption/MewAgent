@@ -1,6 +1,9 @@
 from typing import Optional
+from dataclasses import dataclass, field
 import os
+import asyncio
 import requests
+from contextvars import ContextVar
 from dotenv import load_dotenv
 try:
     from langchain_core.tools import tool
@@ -12,54 +15,56 @@ load_dotenv()
 AMAP_WEATHER_API = os.getenv("AMAP_WEATHER_API")
 AMAP_API_KEY = os.getenv("AMAP_API_KEY")
 
-_LAST_RAG_CONTEXT = None
-_KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
-_RAG_STEP_QUEUE = None  # asyncio.Queue, set by agent before streaming
-_RAG_STEP_LOOP = None   # asyncio loop, captured when setting queue
+
+@dataclass
+class RetrievalState:
+    """请求级检索状态，替代全局变量，每个请求独立隔离。"""
+    call_count: int = 0
+    max_calls: int = 3
+    accumulated_docs: list = field(default_factory=list)
+    rag_traces: list = field(default_factory=list)
+    seen_keys: set = field(default_factory=set)
+    step_queue: Optional[object] = None  # asyncio.Queue or _RagStepProxy
+    step_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-def _set_last_rag_context(context: dict):
-    global _LAST_RAG_CONTEXT
-    _LAST_RAG_CONTEXT = context
+_retrieval_state: ContextVar[RetrievalState] = ContextVar('retrieval_state')
 
 
-def get_last_rag_context(clear: bool = True) -> Optional[dict]:
-    """获取最近一次 RAG 检索上下文，默认读取后清空。"""
-    global _LAST_RAG_CONTEXT
-    context = _LAST_RAG_CONTEXT
-    if clear:
-        _LAST_RAG_CONTEXT = None
-    return context
-
-
-def reset_tool_call_guards():
-    """每轮对话开始时重置工具调用计数。"""
-    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
-    _KNOWLEDGE_TOOL_CALLS_THIS_TURN = 0
+def init_retrieval_state() -> RetrievalState:
+    """创建并设置请求级检索状态。在 chat_with_agent_stream 开头调用。"""
+    state = RetrievalState()
+    _retrieval_state.set(state)
+    return state
 
 
 def set_rag_step_queue(queue):
-    """设置 RAG 步骤队列，并捕获当前事件循环以便跨线程调度。"""
-    global _RAG_STEP_QUEUE, _RAG_STEP_LOOP
-    _RAG_STEP_QUEUE = queue
+    """设置 RAG 步骤队列到当前请求的检索状态中。"""
+    try:
+        state = _retrieval_state.get()
+    except LookupError:
+        return
+    state.step_queue = queue
     if queue:
-        import asyncio
         try:
-            _RAG_STEP_LOOP = asyncio.get_running_loop()
+            state.step_loop = asyncio.get_running_loop()
         except RuntimeError:
-            _RAG_STEP_LOOP = asyncio.get_event_loop()
+            state.step_loop = asyncio.get_event_loop()
     else:
-        _RAG_STEP_LOOP = None
+        state.step_loop = None
 
 
 def emit_rag_step(icon: str, label: str, detail: str = ""):
     """向队列发送一个 RAG 检索步骤。支持跨线程安全调用。"""
-    global _RAG_STEP_QUEUE, _RAG_STEP_LOOP
-    if _RAG_STEP_QUEUE is not None and _RAG_STEP_LOOP is not None:
+    try:
+        state = _retrieval_state.get()
+    except LookupError:
+        return
+    if state.step_queue is not None and state.step_loop is not None:
         step = {"icon": icon, "label": label, "detail": detail}
         try:
-            if not _RAG_STEP_LOOP.is_closed():
-                _RAG_STEP_LOOP.call_soon_threadsafe(_RAG_STEP_QUEUE.put_nowait, step)
+            if not state.step_loop.is_closed():
+                state.step_loop.call_soon_threadsafe(state.step_queue.put_nowait, step)
         except Exception:
             pass
 
