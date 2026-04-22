@@ -281,7 +281,18 @@ def create_agent_with_memory(user_id: str):
             "but do not reveal chain-of-thought. "
             "If you don't know the answer, admit it honestly.\n"
             "\n"
-            "## Memory Tools\n"
+            "## Memory Tools - CRITICAL\n"
+            "WHEN TO CALL save_user_memory TOOL:\n"
+            "- User explicitly says 'remember' / '请记住' / '记住'\n"
+            "- User states a preference (e.g., 'I prefer Chinese answers')\n"
+            "- User tells you something important about themselves\n"
+            "- ALWAYS call save_user_memory BEFORE responding to the user\n"
+            "\n"
+            "WHEN TO CALL search_memories TOOL:\n"
+            "- User asks about previous conversation\n"
+            "- User asks 'do you remember...' / '你还记得...吗'\n"
+            "- At the start of conversation to recall user preferences\n"
+            "\n"
             "Use memory tools to store information that is valuable across sessions:\n"
             "- save_user_memory: User preferences (coding style, language preference)\n"
             "- save_feedback_memory: User corrections or validated approaches\n"
@@ -369,7 +380,9 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
     messages = _build_messages_for_llm(messages, user_id)
 
     messages.append(HumanMessage(content=user_text))
-    result = agent.invoke(
+    # 使用带记忆工具的 Agent 实例
+    memory_agent, _ = create_agent_with_memory(user_id)
+    result = memory_agent.invoke(
         {"messages": messages},
         config={"recursion_limit": 8},
     )
@@ -430,12 +443,14 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     messages.append(HumanMessage(content=user_text))
 
     full_response = ""
+    # 使用带记忆工具的 Agent 实例
+    memory_agent, _ = create_agent_with_memory(user_id)
 
     async def _agent_worker():
         """后台任务：运行 agent 并将内容 chunk 推入输出队列。"""
         nonlocal full_response
         try:
-            async for msg, metadata in agent.astream(
+            async for msg, metadata in memory_agent.astream(
                 {"messages": messages},
                 stream_mode="messages",
                 config={"recursion_limit": 8},
