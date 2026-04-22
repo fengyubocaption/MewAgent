@@ -11,7 +11,8 @@ from datetime import datetime
 from backend.db.cache import cache
 from backend.db.database import SessionLocal
 from backend.db.models import User, ChatSession, ChatMessage
-from backend.agent.memory_manager import create_memory_tools, extract_conversation_memories, get_user_memories
+from backend.agent.memory_tools import create_typed_memory_tools
+from backend.agent.memory_manager import get_user_memories
 
 load_dotenv()
 
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")
 BASE_URL = os.getenv("BASE_URL")
+
+# 记忆 SystemMessage 的特殊前缀，用于识别和过滤
+_MEMORY_SYSTEM_MSG_PREFIX = "[USER_MEMORY] "
+
 
 class ConversationStorage:
     """对话存储（PostgreSQL + Redis）。"""
@@ -71,6 +76,10 @@ class ConversationStorage:
             serialized = []
             now = datetime.utcnow()
             for idx, msg in enumerate(messages):
+                # 跳过记忆 SystemMessage，不存入数据库
+                if isinstance(msg, SystemMessage) and msg.content.startswith(_MEMORY_SYSTEM_MSG_PREFIX):
+                    continue
+
                 rag_trace = None
                 if extra_message_data and idx < len(extra_message_data):
                     extra = extra_message_data[idx] or {}
@@ -241,9 +250,9 @@ def create_agent_instance():
 
 
 def create_agent_with_memory(user_id: str):
-    """创建带 LangMem 记忆工具的 Agent 实例。
+    """创建带类型化记忆工具的 Agent 实例。
 
-    在基础工具（天气、知识库）之上，加入 manage_memory 和 search_memory 工具，
+    在基础工具（天气、知识库）之上，加入类型化记忆工具，
     让 Agent 能在对话中主动存储和检索用户长期记忆。
     """
     model = init_chat_model(
@@ -255,11 +264,11 @@ def create_agent_with_memory(user_id: str):
         stream_usage=True,
     )
 
-    manage_tool, search_tool = create_memory_tools(user_id)
+    typed_tools = create_typed_memory_tools(user_id)
 
     agent = create_agent(
         model=model,
-        tools=[get_current_weather, search_knowledge_base, manage_tool, search_tool],
+        tools=[get_current_weather, search_knowledge_base] + typed_tools,
         system_prompt=(
             "You are a cute cat bot that loves to help users. "
             "When responding, you may use tools to assist. "
@@ -270,9 +279,23 @@ def create_agent_with_memory(user_id: str):
             "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
             "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
             "but do not reveal chain-of-thought. "
-            "If you don't know the answer, admit it honestly. "
-            "Use manage_memory to remember important user preferences, facts, and context. "
-            "Use search_memory to look up previously stored information about the user."
+            "If you don't know the answer, admit it honestly.\n"
+            "\n"
+            "## Memory Tools\n"
+            "Use memory tools to store information that is valuable across sessions:\n"
+            "- save_user_memory: User preferences (coding style, language preference)\n"
+            "- save_feedback_memory: User corrections or validated approaches\n"
+            "- save_project_memory: Project decisions and their reasons\n"
+            "- save_reference_memory: External resource pointers (dashboards, docs)\n"
+            "\n"
+            "## Memory Boundary\n"
+            "DO NOT store in memory:\n"
+            "- File paths, function names, code structure (can be re-read)\n"
+            "- Current task progress (belongs to conversation context)\n"
+            "- Temporary state, branch names, PR numbers (quickly outdated)\n"
+            "- Specific code fixes (code is the source of truth)\n"
+            "\n"
+            "Only store information that remains valuable across sessions and cannot be derived from code."
         ),
     )
     return agent, model
@@ -287,18 +310,21 @@ def _build_messages_for_llm(messages: list, user_id: str) -> list:
 
     替代旧的 ">50 条消息就压缩前 40 条" 的粗暴逻辑。
     现在通过 LangMem 从 PostgreSQL 检索用户记忆，拼入系统提示。
+    记忆 SystemMessage 会加上特殊前缀，保存时会被过滤掉，不会存入数据库。
     """
+    # 先过滤掉已有的记忆 SystemMessage（避免重复注入）
+    messages = [
+        m for m in messages
+        if not (isinstance(m, SystemMessage) and m.content.startswith(_MEMORY_SYSTEM_MSG_PREFIX))
+    ]
+
     # 获取长期记忆
     memory_text = get_user_memories(user_id)
 
     if memory_text:
-        system_msg = SystemMessage(content=memory_text)
-        # 如果消息列表开头没有 SystemMessage，插入一个
-        if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [system_msg] + messages
-        else:
-            # 替换已有的 SystemMessage（可能是旧的摘要）
-            messages[0] = system_msg
+        # 加上特殊前缀，便于后续识别和过滤
+        system_msg = SystemMessage(content=_MEMORY_SYSTEM_MSG_PREFIX + memory_text)
+        messages = [system_msg] + messages
 
     return messages
 
@@ -369,9 +395,6 @@ def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: s
 
     extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
     storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
-
-    # 后台提取长期记忆（不阻塞返回）
-    _schedule_memory_extraction(user_id, messages)
 
     return {
         "response": response_content,
@@ -482,6 +505,3 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     messages.append(AIMessage(content=full_response))
     extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
     storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
-
-    # 后台提取长期记忆（不阻塞返回）
-    _schedule_memory_extraction(user_id, messages)
