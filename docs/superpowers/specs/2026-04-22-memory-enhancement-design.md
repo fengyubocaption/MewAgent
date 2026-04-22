@@ -119,7 +119,7 @@ def search_memories(query: str, memory_type: str | None = None) -> str:
 **内部实现 `_save_memory`**:
 - 调用 LangMem 的 `store.put()`
 - namespace 格式：`("memories", user_id, memory_type)`
-- key 用内容哈希或 LangMem 自动生成
+- key 使用 UUID 或时间戳，避免内容变化时的哈希冲突
 
 ### 4. Agent 集成
 
