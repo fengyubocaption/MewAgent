@@ -71,6 +71,7 @@ class LangMemMemory(Base):
     namespace: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+    memory_type: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
     created_at = mapped_column(DateTime, server_default=text("NOW()"))
     updated_at = mapped_column(DateTime, server_default=text("NOW()"))
 
