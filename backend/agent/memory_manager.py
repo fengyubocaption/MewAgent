@@ -2,11 +2,9 @@
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
-from langmem import create_manage_memory_tool, create_search_memory_tool, create_memory_manager
-from langmem.knowledge.extraction import Memory
 
 load_dotenv()
 
@@ -18,24 +16,6 @@ logger = logging.getLogger(__name__)
 _API_KEY = os.getenv("ARK_API_KEY")
 _MODEL = os.getenv("MODEL")
 _BASE_URL = os.getenv("BASE_URL")
-
-
-def _llm_spec() -> str:
-    """返回用于记忆提取的 LLM 标识。"""
-    return f"{_MODEL or 'claude-sonnet-4-6'}"
-
-
-def _create_chat_model():
-    """创建用于记忆提取的聊天模型。"""
-    from langchain.chat_models import init_chat_model
-
-    return init_chat_model(
-        model=_MODEL or "claude-sonnet-4-6",
-        model_provider="openai",
-        api_key=_API_KEY,
-        base_url=_BASE_URL,
-        temperature=0,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -251,88 +231,6 @@ def get_store() -> BaseStore:
 # ---------------------------------------------------------------------------
 # 核心 API
 # ---------------------------------------------------------------------------
-
-def create_memory_tools(user_id: str):
-    """为指定用户创建 LangMem 记忆工具（manage + search）。
-
-    返回 (manage_tool, search_tool) 元组，可直接注册到 Agent。
-    """
-    store = get_store()
-    ns = ("memories", user_id)
-
-    manage_tool = create_manage_memory_tool(
-        namespace=ns,
-        store=store,
-        name="manage_memory",
-    )
-    search_tool = create_search_memory_tool(
-        namespace=ns,
-        store=store,
-        name="search_memory",
-    )
-    return manage_tool, search_tool
-
-
-def extract_conversation_memories(messages: list, user_id: str) -> list:
-    """从对话消息列表中提取长期记忆并存储。
-
-    Args:
-        messages: LangChain 消息列表（HumanMessage / AIMessage）
-        user_id: 用户标识
-
-    Returns:
-        提取的记忆条目列表
-    """
-    model = _create_chat_model()
-    # 启用插入、更新和删除
-    manager = create_memory_manager(
-        model,
-        enable_inserts=True,
-        enable_updates=True,
-        enable_deletes=True,
-    )
-
-    # 转换为 LangMem 期望的格式
-    langmem_messages = []
-    for msg in messages:
-        role = "user" if getattr(msg, "type", None) == "human" else "assistant"
-        langmem_messages.append({"role": role, "content": str(msg.content)})
-
-    # 获取该用户已有记忆，转换为 LangMem 期望的格式: list[tuple[str, Memory]]
-    store = get_store()
-    existing_items = store.search(("memories", user_id), limit=50)
-    existing = [
-        (item.key, Memory(content=item.value.get("content", "")))
-        for item in existing_items
-        if item.value.get("content")
-    ]
-
-    # 执行提取
-    result = manager.invoke({
-        "messages": langmem_messages,
-        "existing": existing,  # 字段名是 existing，不是 existing_memories
-    })
-
-    # 存储提取结果
-    for memory in result:
-        # memory 是 ExtractedMemory(id=str, content=Memory | None)
-        key = memory.id
-
-        if memory.content is None:
-            # content 为 None 表示删除该记忆
-            store.delete(("memories", user_id, "extracted"), key)
-            logger.debug("删除记忆: user=%s, key=%s", user_id, key)
-        else:
-            # 新增或更新记忆
-            content = memory.content.content  # Memory 模型的 content 字段
-            store.put(
-                ("memories", user_id, "extracted"),
-                key,
-                {"content": content, "kind": "semantic"},
-            )
-
-    return result
-
 
 def get_user_memories(user_id: str, memory_type: str | None = None, query: str = "") -> str:
     """获取用户的长期记忆，格式化为可注入系统提示的文本。

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from backend.agent.agent import chat_with_agent, chat_with_agent_stream, storage
+from backend.agent.agent import chat_with_agent_stream, storage
 from backend.routes.auth import authenticate_user, create_access_token, get_current_user, get_db, get_password_hash, require_admin, resolve_role
 from backend.rag.document_loader import DocumentLoader
 from backend.milvus.embedding import embedding_service
@@ -120,33 +120,6 @@ async def delete_session(session_id: str, current_user: User = Depends(get_curre
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
-    try:
-        session_id = request.session_id or "default_session"
-        resp = chat_with_agent(request.message, current_user.username, session_id)
-        if isinstance(resp, dict):
-            return ChatResponse(**resp)
-        return ChatResponse(response=resp)
-    except Exception as e:
-        message = str(e)
-        match = re.search(r"Error code:\s*(\d{3})", message)
-        if match:
-            code = int(match.group(1))
-            if code == 429:
-                raise HTTPException(
-                    status_code=429,
-                    detail=(
-                        "上游模型服务触发限流/额度限制（429）。请检查账号额度/模型状态。\n"
-                        f"原始错误：{message}"
-                    ),
-                )
-            if code in (401, 403):
-                raise HTTPException(status_code=code, detail=message)
-            raise HTTPException(status_code=code, detail=message)
-        raise HTTPException(status_code=500, detail=message)
 
 
 @router.post("/chat/stream")

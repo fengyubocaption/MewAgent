@@ -125,29 +125,6 @@ class MilvusManager:
             offset += len(batch)
         return out
 
-    def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[dict]:
-        """根据 chunk_id 批量查询分块（用于 Auto-merging 拉取父块）"""
-        ids = [item for item in chunk_ids if item]
-        if not ids:
-            return []
-        quoted_ids = ", ".join([f'"{item}"' for item in ids])
-        filter_expr = f"chunk_id in [{quoted_ids}]"
-        return self.query(
-            filter_expr=filter_expr,
-            output_fields=[
-                "text",
-                "filename",
-                "file_type",
-                "page_number",
-                "chunk_id",
-                "parent_chunk_id",
-                "root_chunk_id",
-                "chunk_level",
-                "chunk_idx",
-            ],
-            limit=len(ids),
-        )
-
     def hybrid_retrieve(
         self,
         dense_embedding: list[float],

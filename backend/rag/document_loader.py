@@ -159,25 +159,3 @@ class DocumentLoader:
             return documents
         except Exception as e:
             raise Exception(f"处理文档失败: {str(e)}")
-
-    def load_documents_from_folder(self, folder_path: str) -> list[dict]:
-        """
-        从文件夹加载所有文档并分片
-        :param folder_path: 文件夹路径
-        :return: 所有分片后的文档列表
-        """
-        all_documents = []
-
-        for filename in os.listdir(folder_path):
-            file_lower = filename.lower()
-            if not (file_lower.endswith(".pdf") or file_lower.endswith((".docx", ".doc")) or file_lower.endswith((".xlsx", ".xls"))):
-                continue
-
-            file_path = os.path.join(folder_path, filename)
-            try:
-                documents = self.load_document(file_path, filename)
-                all_documents.extend(documents)
-            except Exception:
-                continue
-
-        return all_documents

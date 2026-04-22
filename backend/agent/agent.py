@@ -22,9 +22,11 @@ API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")
 BASE_URL = os.getenv("BASE_URL")
 
-# 记忆 SystemMessage 的特殊前缀，用于识别和过滤
-_MEMORY_SYSTEM_MSG_PREFIX = "[USER_MEMORY] "
-
+# 上下文窗口配置
+MAX_CONTEXT_MESSAGES = 20       # 运行时保留的最近消息数
+COMPRESS_THRESHOLD = 30         # 超过此条数触发压缩
+COMPRESS_KEEP_RECENT = 10       # 压缩时保留的最近消息数
+_SUMMARY_PREFIX = "[对话摘要] " # 摘要消息的标识前缀
 
 class ConversationStorage:
     """对话存储（PostgreSQL + Redis）。"""
@@ -51,6 +53,63 @@ class ConversationStorage:
                 messages.append(SystemMessage(content=content))
         return messages
 
+    @staticmethod
+    def _format_messages_for_summary(messages: list) -> str:
+        """将消息列表格式化为摘要输入文本"""
+        lines = []
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                role = "用户"
+            elif isinstance(msg, AIMessage):
+                role = "助手"
+            elif isinstance(msg, SystemMessage):
+                # 跳过已有的摘要消息，避免嵌套
+                if msg.content.startswith(_SUMMARY_PREFIX):
+                    continue
+                role = "系统"
+            else:
+                continue
+            lines.append(f"{role}: {msg.content}")
+        return "\n".join(lines)
+
+    @staticmethod
+    async def _generate_summary(messages: list) -> str:
+        """用 LLM 生成对话连续性摘要"""
+        if not messages:
+            return ""
+
+        model = init_chat_model(
+            model=MODEL,
+            model_provider="openai",
+            api_key=API_KEY,
+            base_url=BASE_URL,
+            temperature=0.3,
+        )
+
+        history_text = ConversationStorage._format_messages_for_summary(messages)
+        prompt = f"""请用中文生成这段对话的连续性摘要，保留关键信息和上下文关联：
+
+        {history_text}
+
+        摘要要求：
+        - 保留重要的用户偏好、需求、约定
+        - 保留已讨论过的关键结论
+        - 语言简洁，不超过 300 字
+        - 摘要格式：直接输出内容，不需要前缀
+        """
+
+        response = await model.ainvoke(prompt)
+        summary = response.content if hasattr(response, "content") else str(response)
+        return _SUMMARY_PREFIX + summary
+
+    @staticmethod
+    def _has_existing_summary(messages: list) -> tuple[bool, int]:
+        """检查是否已有摘要消息，返回 (是否存在, 摘要索引)"""
+        for idx, msg in enumerate(messages):
+            if isinstance(msg, SystemMessage) and msg.content.startswith(_SUMMARY_PREFIX):
+                return True, idx
+        return False, -1
+
     def save(self, user_id: str, session_id: str, messages: list, metadata: dict = None, extra_message_data: list = None):
         """保存对话"""
         db = SessionLocal()
@@ -76,10 +135,6 @@ class ConversationStorage:
             serialized = []
             now = datetime.utcnow()
             for idx, msg in enumerate(messages):
-                # 跳过记忆 SystemMessage，不存入数据库
-                if isinstance(msg, SystemMessage) and msg.content.startswith(_MEMORY_SYSTEM_MSG_PREFIX):
-                    continue
-
                 rag_trace = None
                 if extra_message_data and idx < len(extra_message_data):
                     extra = extra_message_data[idx] or {}
@@ -111,15 +166,85 @@ class ConversationStorage:
         finally:
             db.close()
 
+    async def save_with_compress(self, user_id: str, session_id: str, messages: list, extra_message_data: list = None):
+        """保存对话，超长时自动压缩上下文
+
+        当消息数 > COMPRESS_THRESHOLD 时：
+        - 将早期消息压缩为一条摘要
+        - 保留最近 COMPRESS_KEEP_RECENT 条消息
+        - 摘要 + 最近消息 = 压缩后的完整上下文
+        """
+        if len(messages) > COMPRESS_THRESHOLD:
+            logger.info("触发上下文压缩: %d 条消息 → 摘要 + %d 条", len(messages), COMPRESS_KEEP_RECENT)
+
+            # 分离：早期消息（待压缩） + 最近消息（保留）
+            split_idx = len(messages) - COMPRESS_KEEP_RECENT
+            messages_to_compress = messages[:split_idx]
+            recent_messages = messages[split_idx:]
+
+            # 检查早期消息中是否已有摘要，有的话合并
+            has_summary, summary_idx = self._has_existing_summary(messages_to_compress)
+            if has_summary:
+                # 把旧摘要也纳入重新压缩
+                messages_to_compress = messages_to_compress
+            else:
+                # 纯新消息，直接压缩
+                pass
+
+            try:
+                # 生成摘要
+                summary_text = await self._generate_summary(messages_to_compress)
+                summary_msg = SystemMessage(content=summary_text)
+
+                # 压缩后：摘要 + 最近消息
+                messages = [summary_msg] + recent_messages
+
+                # 同步调整 extra_message_data（只保留最近消息对应的部分）
+                if extra_message_data:
+                    extra_message_data = [None] + extra_message_data[split_idx:]
+
+                logger.info("上下文压缩完成，摘要长度: %d 字", len(summary_text))
+            except Exception as e:
+                logger.warning("上下文压缩失败，使用原始消息保存: %s", e)
+                # 压缩失败回退：只保留最近的消息
+                messages = messages[-MAX_CONTEXT_MESSAGES:]
+                if extra_message_data:
+                    extra_message_data = extra_message_data[-MAX_CONTEXT_MESSAGES:]
+
+        # 执行保存
+        self.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+
     def load(self, user_id: str, session_id: str) -> list:
-        """加载对话"""
+        """加载对话（带上下文截断，摘要消息始终保留）
+
+        策略：如果有摘要消息，摘要 + 最近 MAX_CONTEXT_MESSAGES-1 条
+              否则只保留最近 MAX_CONTEXT_MESSAGES 条
+        """
+        def _truncate_with_summary(records: list) -> list:
+            if not records:
+                return []
+
+            # 检查第一条是否是摘要
+            first = records[0]
+            has_summary = (
+                first.get("type") == "system" and
+                first.get("content", "").startswith(_SUMMARY_PREFIX)
+            )
+
+            if has_summary:
+                # 摘要 + 最近 N-1 条消息
+                return [first] + records[-(MAX_CONTEXT_MESSAGES - 1):]
+            else:
+                # 无摘要，只取最近 N 条
+                return records[-MAX_CONTEXT_MESSAGES:]
+
         cached = cache.get_json(self._messages_cache_key(user_id, session_id))
         if cached is not None:
-            return self._to_langchain_messages(cached)
+            return self._to_langchain_messages(_truncate_with_summary(cached))
 
         records = self.get_session_messages(user_id, session_id)
         cache.set_json(self._messages_cache_key(user_id, session_id), records)
-        return self._to_langchain_messages(records)
+        return self._to_langchain_messages(_truncate_with_summary(records))
 
     def list_sessions(self, user_id: str) -> list:
         """列出用户的所有会话"""
@@ -220,33 +345,56 @@ class ConversationStorage:
 
 
 
-def create_agent_instance():
-    model = init_chat_model(
-        model=MODEL,
-        model_provider="openai",
-        api_key=API_KEY,
-        base_url=BASE_URL,
-        temperature=0.3,
-        stream_usage=True,
+def _build_system_prompt(user_memories: str) -> str:
+    """构建包含用户长期记忆的系统提示词。
+
+    记忆直接注入到系统提示词中，而非污染消息历史，
+    这样不会在上下文压缩时出现问题。
+    """
+    base_prompt = (
+        "You are a cute cat bot that loves to help users. "
+        "When responding, you may use tools to assist. "
+        "Use search_knowledge_base when users ask document/knowledge questions. "
+        "Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn. "
+        "Once you call search_knowledge_base and receive its result, you MUST immediately produce the Final Answer based on that result. "
+        "After receiving search_knowledge_base result, you MUST NOT call any tool again (including get_current_weather or search_knowledge_base). "
+        "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
+        "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
+        "but do not reveal chain-of-thought. "
+        "If you don't know the answer, admit it honestly.\n"
+        "\n"
+        "## Memory Tools - CRITICAL\n"
+        "WHEN TO CALL save_user_memory TOOL:\n"
+        "- User explicitly says 'remember' / '请记住' / '记住'\n"
+        "- User states a preference (e.g., 'I prefer Chinese answers')\n"
+        "- User tells you something important about themselves\n"
+        "- ALWAYS call save_user_memory BEFORE responding to the user\n"
+        "\n"
+        "WHEN TO CALL search_memories TOOL:\n"
+        "- User asks about previous conversation\n"
+        "- User asks 'do you remember...' / '你还记得...吗'\n"
+        "- At the start of conversation to recall user preferences\n"
+        "\n"
+        "Use memory tools to store information that is valuable across sessions:\n"
+        "- save_user_memory: User preferences (coding style, language preference)\n"
+        "- save_feedback_memory: User corrections or validated approaches\n"
+        "- save_project_memory: Project decisions and their reasons\n"
+        "- save_reference_memory: External resource pointers (dashboards, docs)\n"
+        "\n"
+        "## Memory Boundary\n"
+        "DO NOT store in memory:\n"
+        "- File paths, function names, code structure (can be re-read)\n"
+        "- Current task progress (belongs to conversation context)\n"
+        "- Temporary state, branch names, PR numbers (quickly outdated)\n"
+        "- Specific code fixes (code is the source of truth)\n"
+        "\n"
+        "Only store information that remains valuable across sessions and cannot be derived from code."
     )
 
-    agent = create_agent(
-        model=model,
-        tools=[get_current_weather, search_knowledge_base],
-        system_prompt=(
-            "You are a cute cat bot that loves to help users. "
-            "When responding, you may use tools to assist. "
-            "Use search_knowledge_base when users ask document/knowledge questions. "
-            "Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn. "
-            "Once you call search_knowledge_base and receive its result, you MUST immediately produce the Final Answer based on that result. "
-            "After receiving search_knowledge_base result, you MUST NOT call any tool again (including get_current_weather or search_knowledge_base). "
-            "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
-            "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
-            "but do not reveal chain-of-thought. "
-            "If you don't know the answer, admit it honestly."
-        ),
-    )
-    return agent, model
+    if user_memories:
+        return base_prompt + "\n\n## User Long-Term Memory\n" + user_memories
+
+    return base_prompt
 
 
 def create_agent_with_memory(user_id: str):
@@ -265,154 +413,17 @@ def create_agent_with_memory(user_id: str):
     )
 
     typed_tools = create_typed_memory_tools(user_id)
+    user_memories = get_user_memories(user_id)
 
     agent = create_agent(
         model=model,
         tools=[get_current_weather, search_knowledge_base] + typed_tools,
-        system_prompt=(
-            "You are a cute cat bot that loves to help users. "
-            "When responding, you may use tools to assist. "
-            "Use search_knowledge_base when users ask document/knowledge questions. "
-            "Do not call the same tool repeatedly in one turn. At most one knowledge tool call per turn. "
-            "Once you call search_knowledge_base and receive its result, you MUST immediately produce the Final Answer based on that result. "
-            "After receiving search_knowledge_base result, you MUST NOT call any tool again (including get_current_weather or search_knowledge_base). "
-            "If the retrieved context is insufficient, answer honestly that you don't know instead of making up facts. "
-            "If tool results include a Step-back Question/Answer, use that general principle to reason and answer, "
-            "but do not reveal chain-of-thought. "
-            "If you don't know the answer, admit it honestly.\n"
-            "\n"
-            "## Memory Tools - CRITICAL\n"
-            "WHEN TO CALL save_user_memory TOOL:\n"
-            "- User explicitly says 'remember' / '请记住' / '记住'\n"
-            "- User states a preference (e.g., 'I prefer Chinese answers')\n"
-            "- User tells you something important about themselves\n"
-            "- ALWAYS call save_user_memory BEFORE responding to the user\n"
-            "\n"
-            "WHEN TO CALL search_memories TOOL:\n"
-            "- User asks about previous conversation\n"
-            "- User asks 'do you remember...' / '你还记得...吗'\n"
-            "- At the start of conversation to recall user preferences\n"
-            "\n"
-            "Use memory tools to store information that is valuable across sessions:\n"
-            "- save_user_memory: User preferences (coding style, language preference)\n"
-            "- save_feedback_memory: User corrections or validated approaches\n"
-            "- save_project_memory: Project decisions and their reasons\n"
-            "- save_reference_memory: External resource pointers (dashboards, docs)\n"
-            "\n"
-            "## Memory Boundary\n"
-            "DO NOT store in memory:\n"
-            "- File paths, function names, code structure (can be re-read)\n"
-            "- Current task progress (belongs to conversation context)\n"
-            "- Temporary state, branch names, PR numbers (quickly outdated)\n"
-            "- Specific code fixes (code is the source of truth)\n"
-            "\n"
-            "Only store information that remains valuable across sessions and cannot be derived from code."
-        ),
+        system_prompt=_build_system_prompt(user_memories),
     )
     return agent, model
 
 
-agent, model = create_agent_instance()
-
 storage = ConversationStorage()
-
-def _build_messages_for_llm(messages: list, user_id: str) -> list:
-    """构建发送给 LLM 的消息列表，注入用户长期记忆。
-
-    替代旧的 ">50 条消息就压缩前 40 条" 的粗暴逻辑。
-    现在通过 LangMem 从 PostgreSQL 检索用户记忆，拼入系统提示。
-    记忆 SystemMessage 会加上特殊前缀，保存时会被过滤掉，不会存入数据库。
-    """
-    # 先过滤掉已有的记忆 SystemMessage（避免重复注入）
-    messages = [
-        m for m in messages
-        if not (isinstance(m, SystemMessage) and m.content.startswith(_MEMORY_SYSTEM_MSG_PREFIX))
-    ]
-
-    # 获取长期记忆
-    memory_text = get_user_memories(user_id)
-
-    if memory_text:
-        # 加上特殊前缀，便于后续识别和过滤
-        system_msg = SystemMessage(content=_MEMORY_SYSTEM_MSG_PREFIX + memory_text)
-        messages = [system_msg] + messages
-
-    return messages
-
-
-def _schedule_memory_extraction(user_id: str, messages: list):
-    """后台异步提取记忆，不阻塞响应。
-
-    每轮对话结束后，将最近的消息发送给 LangMem 提取长期记忆。
-    """
-    async def _extract():
-        try:
-            # 只提取最近的消息（避免重复提取）
-            recent = messages[-10:]  # 最近 5 轮对话
-            extract_conversation_memories(recent, user_id)
-            logger.debug("记忆提取完成: user=%s", user_id)
-        except Exception as e:
-            logger.warning("记忆提取失败: %s", e)
-
-    # 检查是否有运行中的事件循环
-    try:
-        loop = asyncio.get_running_loop()
-        # 有活跃的事件循环，使用 ensure_future
-        asyncio.ensure_future(_extract(), loop=loop)
-    except RuntimeError:
-        # 没有运行中的事件循环，创建新的事件循环
-        # 这种情况发生在同步调用 chat_with_agent 时
-        try:
-            asyncio.run(_extract())
-        except Exception as e:
-            logger.warning("记忆提取失败（无事件循环）: %s", e)
-
-
-def chat_with_agent(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
-    """使用 Agent 处理用户消息并返回响应"""
-    messages = storage.load(user_id, session_id)
-
-    # 清理可能残留的 RAG 上下文，避免跨请求污染
-    get_last_rag_context(clear=True)
-    reset_tool_call_guards()
-
-    # 注入长期记忆到系统提示
-    messages = _build_messages_for_llm(messages, user_id)
-
-    messages.append(HumanMessage(content=user_text))
-    # 使用带记忆工具的 Agent 实例
-    memory_agent, _ = create_agent_with_memory(user_id)
-    result = memory_agent.invoke(
-        {"messages": messages},
-        config={"recursion_limit": 8},
-    )
-
-    response_content = ""
-    if isinstance(result, dict):
-        if "output" in result:
-            response_content = result["output"]
-        elif "messages" in result and result["messages"]:
-            msg = result["messages"][-1]
-            response_content = getattr(msg, "content", str(msg))
-        else:
-            response_content = str(result)
-    elif hasattr(result, "content"):
-        response_content = result.content
-    else:
-        response_content = str(result)
-
-    messages.append(AIMessage(content=response_content))
-
-    rag_context = get_last_rag_context(clear=True)
-    rag_trace = rag_context.get("rag_trace") if rag_context else None
-
-    extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
-    storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
-
-    return {
-        "response": response_content,
-        "rag_trace": rag_trace,
-    }
 
 
 async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", session_id: str = "default_session"):
@@ -426,9 +437,6 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     # 清理可能残留的 RAG 上下文
     get_last_rag_context(clear=True)
     reset_tool_call_guards()
-
-    # 注入长期记忆到系统提示
-    messages = _build_messages_for_llm(messages, user_id)
 
     # 统一输出队列：所有事件（content / rag_step）都汇入这里
     output_queue = asyncio.Queue()
@@ -450,7 +458,7 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
         """后台任务：运行 agent 并将内容 chunk 推入输出队列。"""
         nonlocal full_response
         try:
-            async for msg, metadata in memory_agent.astream(
+            async for msg, _ in memory_agent.astream(
                 {"messages": messages},
                 stream_mode="messages",
                 config={"recursion_limit": 8},
