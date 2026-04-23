@@ -92,16 +92,38 @@ services:
       - "etcd"
   attu:
     container_name: milvus-attu
-    image: zilliz/attu:v2.5.11  
+    image: zilliz/attu:v2.5.11
     environment:
-      - MILVUS_URL=standalone:19530  
+      - MILVUS_URL=standalone:19530
       - PORT=3000
     ports:
       - "8080:3000"
     depends_on:
       - standalone
     networks:
-      - default  
+      - default
+
+  neo4j:
+    container_name: supermew-neo4j
+    image: neo4j:5.15-community
+    ports:
+      - "7474:7474"   # HTTP
+      - "7687:7687"   # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/supermew2024
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1G
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j:/data
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - default
 
 networks:
   default:
