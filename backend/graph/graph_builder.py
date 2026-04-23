@@ -192,6 +192,7 @@ class GraphBuilder:
         entity_count = 0
         relation_count = 0
         all_entities = {}  # name -> {type, description} 去重
+        all_relations = []  # 收集所有关系，稍后创建
 
         for chunk in chunks:
             chunk_id = chunk.get("chunk_id")
@@ -216,19 +217,19 @@ class GraphBuilder:
                         "description": entity.get("description", ""),
                     }
 
-            # 创建关系
+            # 收集关系（稍后创建，因为需要实体节点先存在）
             for rel in extraction.get("relations", []):
                 head = rel.get("head")
                 tail = rel.get("tail")
                 relation = rel.get("relation")
                 if head and tail and relation:
-                    try:
-                        self.create_relation(head, relation, tail)
-                        relation_count += 1
-                    except Exception as e:
-                        logger.debug(f"创建关系失败 {head}-{relation}->{tail}: {e}")
+                    all_relations.append({
+                        "head": head,
+                        "relation": relation,
+                        "tail": tail,
+                    })
 
-        # 批量创建实体节点并关联到 chunk
+        # 1. 先创建所有实体节点
         for name, info in all_entities.items():
             self.create_entity_node(name, info["type"], info["description"], filename)
             entity_count += 1
@@ -242,6 +243,17 @@ class GraphBuilder:
                         self.link_chunk_to_entity(chunk_id, name)
                     except Exception:
                         pass
+
+        # 2. 再创建关系（实体节点已存在）
+        for rel in all_relations:
+            head = rel.get("head")
+            tail = rel.get("tail")
+            relation = rel.get("relation")
+            try:
+                self.create_relation(head, relation, tail)
+                relation_count += 1
+            except Exception as e:
+                logger.debug(f"创建关系失败 {head}-{relation}->{tail}: {e}")
 
         logger.info(f"文档 {filename} 图谱构建完成: {entity_count} 实体, {relation_count} 关系, {len(chunks)} chunks")
 
