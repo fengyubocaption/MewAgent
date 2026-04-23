@@ -5,7 +5,7 @@ from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
-from backend.rag.rag_utils import retrieve_documents, step_back_expand, generate_hypothetical_document
+from backend.rag.rag_utils import retrieve_documents, retrieve_documents_with_graph, step_back_expand, generate_hypothetical_document
 from backend.agent.tools import emit_rag_step
 
 load_dotenv()
@@ -106,7 +106,7 @@ def retrieve_initial(state: RAGState) -> RAGState:
     query = state["question"]
     emit_rag_step("🔍", "正在检索知识库...", f"查询: {query[:50]}")
     top_k = state.get("top_k", 5)
-    retrieved = retrieve_documents(query, top_k=top_k)
+    retrieved = retrieve_documents_with_graph(query, top_k=top_k)
     results = retrieved.get("docs", [])
     retrieve_meta = retrieved.get("meta", {})
     context = _format_docs(results)
@@ -127,6 +127,14 @@ def retrieve_initial(state: RAGState) -> RAGState:
             f"替换片段: {retrieve_meta.get('auto_merge_replaced_chunks', 0)}"
         ),
     )
+    # 图谱检索信息
+    if retrieve_meta.get("graph_enabled"):
+        emit_rag_step(
+            "🕸️",
+            "知识图谱检索",
+            f"识别实体: {', '.join(retrieve_meta.get('graph_entities', [])) or '无'}，"
+            f"图谱召回: {retrieve_meta.get('graph_chunk_count', 0)} 片段",
+        )
     emit_rag_step("✅", f"检索完成，找到 {len(results)} 个片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")
     rag_trace = {
         "tool_used": True,
@@ -149,6 +157,9 @@ def retrieve_initial(state: RAGState) -> RAGState:
         "auto_merge_threshold": retrieve_meta.get("auto_merge_threshold"),
         "auto_merge_replaced_chunks": retrieve_meta.get("auto_merge_replaced_chunks"),
         "auto_merge_steps": retrieve_meta.get("auto_merge_steps"),
+        "graph_enabled": retrieve_meta.get("graph_enabled"),
+        "graph_entities": retrieve_meta.get("graph_entities"),
+        "graph_chunk_count": retrieve_meta.get("graph_chunk_count"),
     }
     return {
         "query": query,
