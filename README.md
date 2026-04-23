@@ -27,17 +27,24 @@ pip install -e .
 
 ```env
 # ===== LLM =====
+# 必填，LLM API 密钥
 ARK_API_KEY=
+# 必填，主模型，用于 Agent 推理和回答生成
 MODEL=
+# 可选，相关性评分模型，默认与 MODEL 相同
 GRADE_MODEL=
+# 必填，LLM API 地址
 BASE_URL=
 
 # ===== Embedding =====
+# 向量模型名称，默认 BAAI/bge-m3
 EMBEDDING_MODEL=BAAI/bge-m3
+# 运行设备：cpu / cuda /mps
 EMBEDDING_DEVICE=cpu
+# 向量维度，需与 Milvus 集合维度一致，默认 1024
 DENSE_EMBEDDING_DIM=1024
 
-# ===== Rerank (可选) =====
+# ===== Rerank (可选，不配则跳过精排) =====
 RERANK_MODEL=
 RERANK_BINDING_HOST=
 RERANK_API_KEY=
@@ -45,36 +52,56 @@ RERANK_API_KEY=
 # ===== Milvus =====
 MILVUS_HOST=127.0.0.1
 MILVUS_PORT=19530
+# Milvus 集合名称
 MILVUS_COLLECTION=embeddings_collection
 
 # ===== Database / Cache =====
+# PostgreSQL 连接串
 DATABASE_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/langchain_app
+# Redis 连接串
 REDIS_URL=redis://127.0.0.1:6379/0
 
 # ===== Auth =====
+# 必填，JWT 签名密钥，建议用 openssl rand -hex 32 生成
 JWT_SECRET_KEY=
+# 管理员注册邀请码
 ADMIN_INVITE_CODE=supermew-admin-2026
 JWT_ALGORITHM=HS256
+# Token 有效期（分钟）
 JWT_EXPIRE_MINUTES=1440
+# 密码哈希迭代次数
 PASSWORD_PBKDF2_ROUNDS=310000
 
 # ===== Neo4j 知识图谱 =====
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=
+# 是否启用图谱功能，false 则跳过图谱构建和检索
 GRAPH_ENABLED=true
 
-# ===== BM25 (可选) =====
+# ===== BM25 稀疏检索 (可选) =====
+# BM25 状态文件路径，存储词表和文档频次统计，默认 data/bm25_state.json
 # BM25_STATE_PATH=
 
 # ===== Auto-merging (可选) =====
+# 是否启用自动合并（L3→L2→L1）
 # AUTO_MERGE_ENABLED=true
-# AUTO_MERGE_THRESHOLD=0.7
+# 合并阈值：同一父块下有 N 个子块被召回时触发合并
+# AUTO_MERGE_THRESHOLD=2
+# 检索的叶子层级，默认 3
 # LEAF_RETRIEVE_LEVEL=3
 
 # ===== Tools (可选) =====
+# 高德天气 API
 AMAP_WEATHER_API=https://restapi.amap.com/v3/weather/weatherInfo
 AMAP_API_KEY=
+
+# ===== LangSmith 调试追踪 (可选) =====
+# LANGSMITH_TRACING=true
+# LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+# LANGCHAIN_API_KEY=
+# LANGCHAIN_PROJECT=supermew
+
 ```
 
 ### 4) Docker 启动基础设施
