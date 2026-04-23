@@ -6,7 +6,7 @@ import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
-from backend.agent.tools import get_current_weather, search_knowledge_base, get_last_rag_context, reset_tool_call_guards, set_rag_step_queue
+from backend.agent.tools import get_current_weather, search_knowledge_base, init_retrieval_state, set_rag_step_queue, _retrieval_state
 from datetime import datetime
 from backend.db.cache import cache
 from backend.db.database import SessionLocal
@@ -434,9 +434,8 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     """
     messages = storage.load(user_id, session_id)
 
-    # 清理可能残留的 RAG 上下文
-    get_last_rag_context(clear=True)
-    reset_tool_call_guards()
+    # 初始化请求级检索状态（替代全局变量重置）
+    retrieval_state = init_retrieval_state()
 
     # 统一输出队列：所有事件（content / rag_step）都汇入这里
     output_queue = asyncio.Queue()
@@ -461,7 +460,7 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
             async for msg, _ in memory_agent.astream(
                 {"messages": messages},
                 stream_mode="messages",
-                config={"recursion_limit": 8},
+                config={"recursion_limit": 12},
             ):
                 if not isinstance(msg, AIMessageChunk):
                     continue
@@ -513,9 +512,22 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
         if not agent_task.done():
              agent_task.cancel()
 
-    # 获取 RAG trace
-    rag_context = get_last_rag_context(clear=True)
-    rag_trace = rag_context.get("rag_trace") if rag_context else None
+    # 获取累积的 RAG traces
+    rag_trace = None
+    try:
+        final_state = _retrieval_state.get()
+        if final_state.rag_traces:
+            # 多次检索时合并 trace 信息
+            if len(final_state.rag_traces) == 1:
+                rag_trace = final_state.rag_traces[0]
+            else:
+                rag_trace = {
+                    "multi_retrieval": True,
+                    "call_count": final_state.call_count,
+                    "traces": final_state.rag_traces,
+                }
+    except LookupError:
+        pass
 
     # 发送 trace 信息
     if rag_trace:
