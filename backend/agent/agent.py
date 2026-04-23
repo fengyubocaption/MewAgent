@@ -231,6 +231,10 @@ class ConversationStorage:
                 first.get("content", "").startswith(_SUMMARY_PREFIX)
             )
 
+            # 增加长度判断，避免切片重叠导致摘要翻倍
+            if len(records) <= MAX_CONTEXT_MESSAGES:
+                return records
+
             if has_summary:
                 # 摘要 + 最近 N-1 条消息
                 return [first] + records[-(MAX_CONTEXT_MESSAGES - 1):]
@@ -539,7 +543,7 @@ async def chat_with_agent_stream(user_text: str, user_id: str = "default_user", 
     # 发送结束信号
     yield "data: [DONE]\n\n"
 
-    # 保存对话
+    # 保存对话（带上下文压缩）
     messages.append(AIMessage(content=full_response))
     extra_message_data = [None] * (len(messages) - 1) + [{"rag_trace": rag_trace}]
-    storage.save(user_id, session_id, messages, extra_message_data=extra_message_data)
+    await storage.save_with_compress(user_id, session_id, messages, extra_message_data=extra_message_data)
