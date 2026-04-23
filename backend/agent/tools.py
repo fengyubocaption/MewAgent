@@ -132,42 +132,93 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
 
 
 @tool("search_knowledge_base")
-def search_knowledge_base(query: str) -> str:
-    """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors)."""
-    # ... guards omitted ...
-    global _KNOWLEDGE_TOOL_CALLS_THIS_TURN
-    if _KNOWLEDGE_TOOL_CALLS_THIS_TURN >= 1:
-        return (
-            "TOOL_CALL_LIMIT_REACHED: search_knowledge_base has already been called once in this turn. "
-            "Use the existing retrieval result and provide the final answer directly."
-        )
-    _KNOWLEDGE_TOOL_CALLS_THIS_TURN += 1
+def search_knowledge_base(query: str, top_k: int = 5) -> str:
+    """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors).
+    Can be called multiple times per turn (max 3) to iteratively refine retrieval."""
+    try:
+        state = _retrieval_state.get()
+    except LookupError:
+        state = init_retrieval_state()
+
+    # 检查调用次数上限
+    if state.call_count >= state.max_calls:
+        # 已达上限，返回累积结果
+        if state.accumulated_docs:
+            formatted = _format_accumulated_docs(state)
+            return f"{formatted}\n\n⚠️ 已达检索上限（{state.max_calls}次），请基于以上信息回答。"
+        return f"已达检索上限（{state.max_calls}次），且未找到任何相关文档。请诚实说明无法回答。"
+
+    state.call_count += 1
+    current_call = state.call_count
 
     from backend.rag.rag_pipeline import run_rag_graph
 
-    # 在同步工具中获取当前的 Loop 可能不可靠，但我们之前是通过 call_soon_threadsafe 调度的。
-    # 这里 _RAG_STEP_QUEUE 是在主线程/Loop 设置的全局变量。
-    # 如果工具运行在线程池中，它是可以访问到全局变量 _RAG_STEP_QUEUE 的。
-    # emit_rag_step 内部做了 try-except 和 get_event_loop()。
+    rag_result = run_rag_graph(query, top_k=top_k)
 
-    # 问题可能出在 asyncio.get_event_loop() 在子线程中调用会报错或者拿不到主线程的loop。
-    # 我们应该在 set_rag_step_queue 时也保存 loop 引用，或者在 emit_rag_step 中更健壮地获取 loop。
-
-    rag_result = run_rag_graph(query)
-
-    docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
+    new_docs = rag_result.get("docs", []) if isinstance(rag_result, dict) else []
     rag_trace = rag_result.get("rag_trace", {}) if isinstance(rag_result, dict) else {}
     if rag_trace:
-        _set_last_rag_context({"rag_trace": rag_trace})
+        state.rag_traces.append(rag_trace)
 
-    if not docs:
+    # 去重：与已累积文档比对
+    added_count = 0
+    for doc in new_docs:
+        key = (doc.get("filename"), doc.get("page_number"), doc.get("text"))
+        if key not in state.seen_keys:
+            state.seen_keys.add(key)
+            state.accumulated_docs.append(doc)
+            added_count += 1
+
+    # 构建返回内容
+    if not state.accumulated_docs:
+        if current_call < state.max_calls:
+            return (
+                f"未找到相关文档（第{current_call}次/最多{state.max_calls}次）。\n"
+                "建议换一个查询角度再次检索，或诚实说明无法回答。"
+            )
         return "No relevant documents found in the knowledge base."
 
+    formatted = _format_accumulated_docs(state)
+
+    # 本次检索摘要
+    strategy = rag_trace.get("rewrite_strategy", "direct") if rag_trace else "direct"
+    rerank_score = None
+    if state.accumulated_docs:
+        for doc in reversed(state.accumulated_docs):
+            if doc.get("rerank_score") is not None:
+                rerank_score = doc.get("rerank_score")
+                break
+
+    summary_lines = [
+        f"查询: {query}",
+        f"策略: {strategy}",
+    ]
+    if rerank_score is not None:
+        summary_lines.append(f"rerank 最高分: {rerank_score:.2f}")
+
+    # 引导语
+    if current_call >= state.max_calls:
+        guidance = f"⚠️ 已达检索上限（{state.max_calls}次），请基于以上信息回答。"
+    else:
+        remaining = state.max_calls - current_call
+        guidance = f"如需补充检索其他方面，可再次调用（剩余{remaining}次）；如信息已充分，请直接回答。"
+
+    return (
+        f"[检索结果 - 第{current_call}次/最多{state.max_calls}次] "
+        f"已累积 {len(state.accumulated_docs)} 篇文档，本次新增 {added_count} 篇：\n\n"
+        f"{formatted}\n\n"
+        f"---本次检索摘要---\n"
+        + "\n".join(summary_lines)
+        + f"\n\n{guidance}"
+    )
+
+
+def _format_accumulated_docs(state: RetrievalState) -> str:
+    """格式化累积文档列表。"""
     formatted = []
-    for i, result in enumerate(docs, 1):
+    for i, result in enumerate(state.accumulated_docs, 1):
         source = result.get("filename", "Unknown")
         page = result.get("page_number", "N/A")
         text = result.get("text", "")
         formatted.append(f"[{i}] {source} (Page {page}):\n{text}")
-
-    return "Retrieved Chunks:\n" + "\n\n---\n\n".join(formatted)
+    return "\n\n---\n\n".join(formatted)
