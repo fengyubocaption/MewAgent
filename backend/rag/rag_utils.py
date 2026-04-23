@@ -342,3 +342,87 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
                     "candidate_count": 0,
                 },
             }
+
+
+# ===== 向量 + 图谱融合检索 =====
+
+GRAPH_ENABLED = os.getenv("GRAPH_ENABLED", "true").lower() != "false"
+
+
+def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
+    """向量 + 图谱 并行融合检索
+
+    Returns:
+        {
+            "docs": [...],
+            "meta": {
+                ...原有 meta 信息...,
+                "graph_enabled": bool,
+                "graph_entities": list[str],
+                "graph_chunk_count": int,
+            }
+        }
+    """
+    # 1. 向量检索（原有逻辑）
+    vector_result = retrieve_documents(query, top_k=top_k * 2)
+    vector_docs = vector_result.get("docs", [])
+    meta = vector_result.get("meta", {})
+
+    meta["graph_enabled"] = False
+    meta["graph_entities"] = []
+    meta["graph_chunk_count"] = 0
+
+    if not GRAPH_ENABLED:
+        return {"docs": vector_docs[:top_k], "meta": meta}
+
+    # 2. 图谱检索（同步调用，图谱检索器内部是轻量级 Cypher 查询）
+    try:
+        from backend.graph.graph_retriever import GraphRetriever
+        from backend.graph.neo4j_client import get_neo4j_client
+
+        retriever = GraphRetriever(get_neo4j_client())
+        graph_result = retriever.retrieve_by_query(query, top_k)
+
+        if not graph_result.get("graph_enabled", True):
+            meta["graph_enabled"] = False
+            return {"docs": vector_docs[:top_k], "meta": meta}
+
+    except Exception as e:
+        logger.warning(f"图谱检索失败，降级为纯向量检索: {e}")
+        meta["graph_enabled"] = False
+        meta["graph_error"] = str(e)
+        return {"docs": vector_docs[:top_k], "meta": meta}
+
+    graph_docs = graph_result.get("chunks", [])
+    meta["graph_enabled"] = True
+    meta["graph_entities"] = graph_result.get("entities", [])
+    meta["graph_chunk_count"] = len(graph_docs)
+
+    # 3. 去重融合
+    seen = set()
+    merged = []
+
+    # 先加入向量检索结果（优先级高）
+    for doc in vector_docs:
+        key = doc.get("chunk_id") or (doc.get("filename"), doc.get("text", "")[:100])
+        if key not in seen:
+            seen.add(key)
+            doc["source"] = "vector"
+            merged.append(doc)
+
+    # 再加入图谱检索结果
+    for doc in graph_docs:
+        key = doc.get("chunk_id") or (doc.get("doc_id"), doc.get("text", "")[:100])
+        if key not in seen:
+            seen.add(key)
+            doc["source"] = "graph"
+            merged.append(doc)
+
+    # 4. 排序（优先向量 rerank_score，其次图谱 graph_score）
+    def sort_key(doc):
+        score = doc.get("rerank_score") or doc.get("score") or doc.get("graph_score") or 0
+        return -score if isinstance(score, (int, float)) else 0
+
+    merged.sort(key=sort_key)
+
+    return {"docs": merged[:top_k], "meta": meta}
