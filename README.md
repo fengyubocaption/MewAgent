@@ -23,11 +23,14 @@ pip install -e .
 
 ### 3) 创建 `.env` 文件
 
+参考 `.env.example`：
+
 ```env
 # ===== LLM =====
-ARK_API_KEY=your_ark_api_key
-MODEL=your_model_name
-BASE_URL=https://your-llm-endpoint/v1
+ARK_API_KEY=
+MODEL=
+GRADE_MODEL=
+BASE_URL=
 
 # ===== Embedding =====
 EMBEDDING_MODEL=BAAI/bge-m3
@@ -35,9 +38,9 @@ EMBEDDING_DEVICE=cpu
 DENSE_EMBEDDING_DIM=1024
 
 # ===== Rerank (可选) =====
-RERANK_MODEL=your_rerank_model
-RERANK_BINDING_HOST=https://your-rerank-host
-RERANK_API_KEY=your_rerank_api_key
+RERANK_MODEL=
+RERANK_BINDING_HOST=
+RERANK_API_KEY=
 
 # ===== Milvus =====
 MILVUS_HOST=127.0.0.1
@@ -49,21 +52,29 @@ DATABASE_URL=postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/langchain_ap
 REDIS_URL=redis://127.0.0.1:6379/0
 
 # ===== Auth =====
-JWT_SECRET_KEY=replace-with-strong-random-secret
+JWT_SECRET_KEY=
 ADMIN_INVITE_CODE=supermew-admin-2026
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
 PASSWORD_PBKDF2_ROUNDS=310000
 
 # ===== Neo4j 知识图谱 =====
-NEO4J_URI=bolt://127.0.0.1:7687
+NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_neo4j_password
+NEO4J_PASSWORD=
 GRAPH_ENABLED=true
+
+# ===== BM25 (可选) =====
+# BM25_STATE_PATH=
+
+# ===== Auto-merging (可选) =====
+# AUTO_MERGE_ENABLED=true
+# AUTO_MERGE_THRESHOLD=0.7
+# LEAF_RETRIEVE_LEVEL=3
 
 # ===== Tools (可选) =====
 AMAP_WEATHER_API=https://restapi.amap.com/v3/weather/weatherInfo
-AMAP_API_KEY=your_amap_api_key
+AMAP_API_KEY=
 ```
 
 ### 4) Docker 启动基础设施
@@ -184,16 +195,29 @@ data/                   — bm25_state.json, 上传文档
 
 ## 环境变量
 
-| 变量 | 说明 |
-|------|------|
-| `ARK_API_KEY`, `MODEL`, `BASE_URL` | LLM 配置 |
-| `EMBEDDING_MODEL`, `EMBEDDING_DEVICE`, `DENSE_EMBEDDING_DIM` | 向量模型 |
-| `RERANK_MODEL`, `RERANK_BINDING_HOST`, `RERANK_API_KEY` | Rerank (可选) |
-| `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION` | Milvus |
-| `DATABASE_URL`, `REDIS_URL` | PostgreSQL + Redis |
-| `JWT_SECRET_KEY`, `ADMIN_INVITE_CODE` | 鉴权 |
-| `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `GRAPH_ENABLED` | Neo4j 图谱 |
-| `AUTO_MERGE_ENABLED`, `AUTO_MERGE_THRESHOLD` | Auto-merging |
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `ARK_API_KEY` | LLM API 密钥 | - |
+| `MODEL` | 主模型，用于 Agent 推理 | - |
+| `GRADE_MODEL` | 相关性评分模型 | 与 MODEL 相同 |
+| `BASE_URL` | LLM API 地址 | - |
+| `EMBEDDING_MODEL` | 向量模型名称 | `BAAI/bge-m3` |
+| `EMBEDDING_DEVICE` | 运行设备 | `cpu` |
+| `DENSE_EMBEDDING_DIM` | 向量维度 | `1024` |
+| `RERANK_MODEL`, `RERANK_BINDING_HOST`, `RERANK_API_KEY` | Rerank 精排配置 | - |
+| `MILVUS_HOST`, `MILVUS_PORT`, `MILVUS_COLLECTION` | Milvus 向量库 | `127.0.0.1:19530` |
+| `DATABASE_URL` | PostgreSQL 连接串 | - |
+| `REDIS_URL` | Redis 连接串 | - |
+| `JWT_SECRET_KEY` | JWT 签名密钥 | - |
+| `ADMIN_INVITE_CODE` | 管理员注册邀请码 | - |
+| `JWT_EXPIRE_MINUTES` | Token 有效期（分钟） | `1440` |
+| `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | Neo4j 图谱连接 | - |
+| `GRAPH_ENABLED` | 是否启用图谱功能 | `true` |
+| `BM25_STATE_PATH` | BM25 统计文件路径 | `data/bm25_state.json` |
+| `AUTO_MERGE_ENABLED` | 是否启用自动合并 | `true` |
+| `AUTO_MERGE_THRESHOLD` | 合并阈值（子块数） | `2` |
+| `LEAF_RETRIEVE_LEVEL` | 检索叶子层级 | `3` |
+| `AMAP_API_KEY` | 高德天气 API 密钥 | - |
 
 ## SSE 事件格式
 
