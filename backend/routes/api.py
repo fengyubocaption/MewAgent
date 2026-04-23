@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -15,6 +16,8 @@ from backend.milvus.milvus_client import MilvusManager
 from backend.milvus.milvus_writer import MilvusWriter
 from backend.db.models import User
 from backend.rag.parent_chunk_store import ParentChunkStore
+from backend.graph.graph_builder import GraphBuilder
+from backend.graph.neo4j_client import get_neo4j_client
 from backend.routes.schemas import (
     AuthResponse,
     ChatRequest,
@@ -32,6 +35,8 @@ from backend.routes.schemas import (
     SessionListResponse,
     SessionMessagesResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR.parent / "data"
@@ -218,6 +223,21 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         parent_chunk_store.upsert_documents(parent_docs)
         milvus_writer.write_documents(leaf_docs)
 
+        # 构建知识图谱（如果启用）
+        graph_enabled = os.getenv("GRAPH_ENABLED", "true").lower() != "false"
+        graph_result = None
+        if graph_enabled:
+            try:
+                graph_builder = GraphBuilder(get_neo4j_client())
+                graph_result = graph_builder.build_graph_for_document(
+                    doc_id=filename,
+                    filename=filename,
+                    chunks=leaf_docs,
+                )
+            except Exception as graph_err:
+                logger.warning(f"图谱构建失败（不影响文档上传）: {graph_err}")
+                graph_result = None
+
         return DocumentUploadResponse(
             filename=filename,
             chunks_processed=len(leaf_docs),
@@ -240,6 +260,15 @@ async def delete_document(filename: str, _: User = Depends(require_admin)):
 
         # 删除 PostgreSQL 中的关系型结构（L1/L2 父分块）
         parent_chunk_store.delete_by_filename(filename)
+
+        # 删除知识图谱数据（如果启用）
+        graph_enabled = os.getenv("GRAPH_ENABLED", "true").lower() != "false"
+        if graph_enabled:
+            try:
+                graph_builder = GraphBuilder(get_neo4j_client())
+                graph_builder.delete_graph_for_document(filename)
+            except Exception as graph_err:
+                logger.warning(f"图谱删除失败（不影响文档删除）: {graph_err}")
 
         return DocumentDeleteResponse(
             filename=filename,
