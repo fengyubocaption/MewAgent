@@ -929,23 +929,9 @@ git commit -m "feat(graph): 图谱检索器 + 多跳查询"
 ```python
 # ===== 向量 + 图谱融合检索 =====
 
-import asyncio
 import os
 
 GRAPH_ENABLED = os.getenv("GRAPH_ENABLED", "true").lower() != "false"
-
-
-async def _graph_retrieve_async(query: str, top_k: int) -> dict:
-    """异步图谱检索"""
-    from backend.graph.graph_retriever import GraphRetriever
-    from backend.graph.neo4j_client import get_neo4j_client
-    
-    try:
-        retriever = GraphRetriever(get_neo4j_client())
-        return retriever.retrieve_by_query(query, top_k)
-    except Exception as e:
-        logger.warning(f"图谱检索异常: {e}")
-        return {"entities": [], "chunks": [], "graph_enabled": False, "error": str(e)}
 
 
 def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
@@ -974,31 +960,26 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
     if not GRAPH_ENABLED:
         return {"docs": vector_docs[:top_k], "meta": meta}
     
-    # 2. 图谱检索
+    # 2. 图谱检索（同步调用，图谱检索器内部是轻量级 Cypher 查询）
     try:
-        graph_result = _graph_retrieve_async(query, top_k)
-        # 由于我们在同步上下文中，需要用 asyncio.run 或检查是否在事件循环中
-        try:
-            loop = asyncio.get_running_loop()
-            # 已在异步上下文，创建任务
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                graph_result = loop.run_in_executor(
-                    pool, 
-                    lambda: GraphRetriever(get_neo4j_client()).retrieve_by_query(query, top_k)
-                )
-        except RuntimeError:
-            # 不在异步上下文，直接同步调用
-            from backend.graph.graph_retriever import GraphRetriever
-            from backend.graph.neo4j_client import get_neo4j_client
-            retriever = GraphRetriever(get_neo4j_client())
-            graph_result = retriever.retrieve_by_query(query, top_k)
+        from backend.graph.graph_retriever import GraphRetriever
+        from backend.graph.neo4j_client import get_neo4j_client
+        
+        retriever = GraphRetriever(get_neo4j_client())
+        graph_result = retriever.retrieve_by_query(query, top_k)
+        
+        if not graph_result.get("graph_enabled", True):
+            meta["graph_enabled"] = False
+            return {"docs": vector_docs[:top_k], "meta": meta}
+            
     except Exception as e:
-        logger.warning(f"图谱检索失败: {e}")
-        graph_result = {"entities": [], "chunks": []}
+        logger.warning(f"图谱检索失败，降级为纯向量检索: {e}")
+        meta["graph_enabled"] = False
+        meta["graph_error"] = str(e)
+        return {"docs": vector_docs[:top_k], "meta": meta}
     
     graph_docs = graph_result.get("chunks", [])
-    meta["graph_enabled"] = graph_result.get("graph_enabled", True)
+    meta["graph_enabled"] = True
     meta["graph_entities"] = graph_result.get("entities", [])
     meta["graph_chunk_count"] = len(graph_docs)
     
@@ -1032,13 +1013,9 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
     return {"docs": merged[:top_k], "meta": meta}
 ```
 
-- [ ] **Step 2: 添加必要的 import**
+- [ ] **Step 2: 确认无需额外 import**
 
-在文件顶部添加：
-```python
-from backend.graph.graph_retriever import GraphRetriever
-from backend.graph.neo4j_client import get_neo4j_client
-```
+融合检索函数内部已按需导入 `GraphRetriever` 和 `get_neo4j_client`，无需在文件顶部添加 import。
 
 - [ ] **Step 3: Commit**
 
