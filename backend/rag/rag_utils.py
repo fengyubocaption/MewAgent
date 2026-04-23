@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 import os
 import json
 import requests
@@ -33,7 +33,14 @@ def _get_rerank_endpoint() -> str:
     if not RERANK_BINDING_HOST:
         return ""
     host = RERANK_BINDING_HOST.strip().rstrip("/")
-    return host if host.endswith("/v1/rerank") else f"{host}/v1/rerank"
+    # 阿里云 DashScope 原生 API
+    if "dashscope.aliyuncs.com" in host:
+        return "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    # 支持多种 rerank API 路径格式
+    if host.endswith("/rerank") or host.endswith("/v1/rerank"):
+        return host
+    # vLLM / OpenAI 兼容格式
+    return f"{host}/v1/rerank"
 
 
 def _merge_to_parent_level(docs: List[dict], threshold: int = 2) -> Tuple[List[dict], int]:
@@ -105,6 +112,37 @@ def _auto_merge_documents(docs: List[dict], top_k: int) -> Tuple[List[dict], Dic
     }
 
 
+def _try_rerank_request(url: str, payload: dict, headers: dict, docs_with_rank: List[dict], top_k: int, meta: Dict[str, Any], is_dashscope: bool = False) -> Optional[Tuple[List[dict], Dict[str, Any]]]:
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        if response.status_code >= 400:
+            meta["rerank_error"] = f"HTTP {response.status_code} (URL: {url}): {response.text}"
+            return None
+
+        data = response.json()
+        # 阿里云 DashScope 返回格式是 {"output": {"results": [...]}}
+        items = data.get("output", {}).get("results", []) if is_dashscope else data.get("results", [])
+        reranked = []
+        for item in items:
+            idx = item.get("index")
+            if isinstance(idx, int) and 0 <= idx < len(docs_with_rank):
+                doc = dict(docs_with_rank[idx])
+                score = item.get("relevance_score")
+                if score is not None:
+                    doc["rerank_score"] = score
+                reranked.append(doc)
+
+        if reranked:
+            meta["rerank_endpoint"] = url
+            return reranked[:top_k], meta
+
+        meta["rerank_error"] = "empty_rerank_results"
+        return None
+    except (requests.RequestException, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+        meta["rerank_error"] = str(e)
+        return None
+
+
 def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[dict], Dict[str, Any]]:
     docs_with_rank = [{**doc, "rrf_rank": i} for i, doc in enumerate(docs, 1)]
     meta: Dict[str, Any] = {
@@ -118,49 +156,54 @@ def _rerank_documents(query: str, docs: List[dict], top_k: int) -> Tuple[List[di
     if not docs_with_rank or not meta["rerank_enabled"]:
         return docs_with_rank[:top_k], meta
 
-    payload = {
-        "model": RERANK_MODEL,
-        "query": query,
-        "documents": [doc.get("text", "") for doc in docs_with_rank],
-        "top_n": min(top_k, len(docs_with_rank)),
-        "return_documents": False,
-    }
-
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {RERANK_API_KEY}",
     }
-    try:
-        meta["rerank_applied"] = True
-        response = requests.post(
-            meta["rerank_endpoint"],
-            headers=headers,
-            json=payload,
-            timeout=15,
-        )
-        if response.status_code >= 400:
-            meta["rerank_error"] = f"HTTP {response.status_code}: {response.text}"
-            return docs_with_rank[:top_k], meta
 
-        items = response.json().get("results", [])
-        reranked = []
-        for item in items:
-            idx = item.get("index")
-            if isinstance(idx, int) and 0 <= idx < len(docs_with_rank):
-                doc = dict(docs_with_rank[idx])
-                score = item.get("relevance_score")
-                if score is not None:
-                    doc["rerank_score"] = score
-                reranked.append(doc)
+    meta["rerank_applied"] = True
+    host = RERANK_BINDING_HOST.strip().rstrip("/")
 
-        if reranked:
-            return reranked[:top_k], meta
+    # 检测是否是阿里云 DashScope
+    is_dashscope = "dashscope.aliyuncs.com" in host
+    if is_dashscope:
+        # 阿里云 DashScope 原生 API 格式
+        url = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+        payload = {
+            "model": RERANK_MODEL,
+            "input": {
+                "query": query,
+                "documents": [doc.get("text", "") for doc in docs_with_rank],
+            },
+        }
+        result = _try_rerank_request(url, payload, headers, docs_with_rank, top_k, meta, is_dashscope=True)
+        if result is not None:
+            return result
+    else:
+        # OpenAI/Jina 兼容格式
+        payload = {
+            "model": RERANK_MODEL,
+            "query": query,
+            "documents": [doc.get("text", "") for doc in docs_with_rank],
+            "top_n": min(top_k, len(docs_with_rank)),
+            "return_documents": False,
+        }
 
-        meta["rerank_error"] = "empty_rerank_results"
-        return docs_with_rank[:top_k], meta
-    except (requests.RequestException, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-        meta["rerank_error"] = str(e)
-        return docs_with_rank[:top_k], meta
+        # 尝试多个路径格式
+        endpoints_to_try = [
+            f"{host}/v1/rerank",
+            f"{host}/rerank",
+        ]
+        # 如果 host 已经包含路径，就只试它一个
+        if host.endswith("/rerank") or host.endswith("/v1/rerank"):
+            endpoints_to_try = [host]
+
+        for url in endpoints_to_try:
+            result = _try_rerank_request(url, payload, headers, docs_with_rank, top_k, meta)
+            if result is not None:
+                return result
+
+    return docs_with_rank[:top_k], meta
 
 
 def _get_stepback_model():
