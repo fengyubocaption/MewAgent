@@ -1,9 +1,12 @@
+import logging
 from collections import defaultdict
 from typing import List, Tuple, Dict, Any, Optional
 import os
 import json
 import requests
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 from backend.milvus.milvus_client import MilvusManager
 from backend.milvus.embedding import embedding_service as _embedding_service
@@ -363,7 +366,7 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
             }
         }
     """
-    # 1. 向量检索（原有逻辑）
+    # 1. 向量检索（原有逻辑，已包含 auto_merge）
     vector_result = retrieve_documents(query, top_k=top_k * 2)
     vector_docs = vector_result.get("docs", [])
     meta = vector_result.get("meta", {})
@@ -371,6 +374,7 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
     meta["graph_enabled"] = False
     meta["graph_entities"] = []
     meta["graph_chunk_count"] = 0
+    meta["graph_auto_merge_applied"] = False
 
     if not GRAPH_ENABLED:
         return {"docs": vector_docs[:top_k], "meta": meta}
@@ -398,7 +402,13 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
     meta["graph_entities"] = graph_result.get("entities", [])
     meta["graph_chunk_count"] = len(graph_docs)
 
-    # 3. 去重融合
+    # 3. 对图谱结果应用 auto_merge（与向量检索保持一致）
+    if graph_docs:
+        graph_docs, graph_merge_meta = _auto_merge_documents(graph_docs, top_k=top_k)
+        meta["graph_auto_merge_applied"] = graph_merge_meta.get("auto_merge_applied", False)
+        meta["graph_auto_merge_replaced_chunks"] = graph_merge_meta.get("auto_merge_replaced_chunks", 0)
+
+    # 4. 去重融合
     seen = set()
     merged = []
 
@@ -418,7 +428,7 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
             doc["source"] = "graph"
             merged.append(doc)
 
-    # 4. 排序（优先向量 rerank_score，其次图谱 graph_score）
+    # 5. 排序（优先向量 rerank_score，其次图谱 graph_score）
     def sort_key(doc):
         score = doc.get("rerank_score") or doc.get("score") or doc.get("graph_score") or 0
         return -score if isinstance(score, (int, float)) else 0

@@ -166,6 +166,7 @@ class GraphRetriever:
         MATCH (e:Entity)-[m:MENTIONS]-(c:Chunk)
         WHERE e.name IN $entity_names
         RETURN DISTINCT c.id as chunk_id, c.doc_id as doc_id, c.text as text,
+               c.parent_id as parent_chunk_id, c.level as chunk_level,
                collect(e.name) as matched_entities, sum(m.count) as relevance_score
         ORDER BY relevance_score DESC
         LIMIT $limit
@@ -179,6 +180,7 @@ class GraphRetriever:
             MATCH (e:Entity)-[m:MENTIONS]-(c:Chunk)
             WHERE any(name IN $entity_names WHERE e.name CONTAINS replace(name, ' ', '') OR replace(e.name, ' ', '') CONTAINS name)
             RETURN DISTINCT c.id as chunk_id, c.doc_id as doc_id, c.text as text,
+                   c.parent_id as parent_chunk_id, c.level as chunk_level,
                    collect(e.name) as matched_entities, sum(m.count) as relevance_score
             ORDER BY relevance_score DESC
             LIMIT $limit
