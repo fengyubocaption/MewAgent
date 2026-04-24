@@ -229,13 +229,14 @@ def _generate_step_back_question(query: str) -> str:
     if not model:
         return ""
     prompt = (
-        "请将用户的具体问题抽象成更高层次、更概括的‘退步问题’，"
+        "请将用户的具体问题抽象成更高层次、更概括的’退步问题’，"
         "用于探寻背后的通用原理或核心概念。只输出退步问题一句话，不要解释。\n"
         f"用户问题：{query}"
     )
     try:
         return (model.invoke(prompt).content or "").strip()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"生成退步问题失败: {e}")
         return ""
 
 
@@ -250,7 +251,8 @@ def _answer_step_back_question(step_back_question: str) -> str:
     )
     try:
         return (model.invoke(prompt).content or "").strip()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"回答退步问题失败: {e}")
         return ""
 
 
@@ -259,14 +261,15 @@ def generate_hypothetical_document(query: str) -> str:
     if not model:
         return ""
     prompt = (
-        "请基于用户问题生成一段‘假设性文档’，内容应像真实资料片段，"
+        "请基于用户问题生成一段’假设性文档’，内容应像真实资料片段，"
         "用于帮助检索相关信息。文档可以包含合理推测，但需与问题语义相关。"
         "只输出文档正文，不要标题或解释。\n"
         f"用户问题：{query}"
     )
     try:
         return (model.invoke(prompt).content or "").strip()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"生成假设性文档失败: {e}")
         return ""
 
 
@@ -289,7 +292,7 @@ def step_back_expand(query: str) -> dict:
 
 
 def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
-    candidate_k = max(top_k * 3, top_k)
+    candidate_k = top_k * 3
     filter_expr = f"chunk_level == {LEAF_RETRIEVE_LEVEL}"
     try:
         dense_embeddings = _embedding_service.get_embeddings([query])
@@ -309,7 +312,8 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
         rerank_meta["leaf_retrieve_level"] = LEAF_RETRIEVE_LEVEL
         rerank_meta.update(merge_meta)
         return {"docs": merged_docs, "meta": rerank_meta}
-    except Exception:
+    except Exception as e:
+        logger.warning(f"混合检索失败，降级为纯向量检索: {e}")
         try:
             dense_embeddings = _embedding_service.get_embeddings([query])
             dense_embedding = dense_embeddings[0]
@@ -325,7 +329,8 @@ def retrieve_documents(query: str, top_k: int = 5) -> Dict[str, Any]:
             rerank_meta["leaf_retrieve_level"] = LEAF_RETRIEVE_LEVEL
             rerank_meta.update(merge_meta)
             return {"docs": merged_docs, "meta": rerank_meta}
-        except Exception:
+        except Exception as e2:
+            logger.error(f"纯向量检索也失败: {e2}")
             return {
                 "docs": [],
                 "meta": {

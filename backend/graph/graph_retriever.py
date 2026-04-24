@@ -161,12 +161,14 @@ class GraphRetriever:
         if not entity_names:
             return []
 
-        # 先尝试精确匹配
+        # 先尝试精确匹配，同时关联 Document 节点获取 filename
         query = """
         MATCH (e:Entity)-[m:MENTIONS]-(c:Chunk)
         WHERE e.name IN $entity_names
+        OPTIONAL MATCH (d:Document {id: c.doc_id})
         RETURN DISTINCT c.id as chunk_id, c.doc_id as doc_id, c.text as text,
                c.parent_id as parent_chunk_id, c.level as chunk_level,
+               d.filename as filename,
                collect(e.name) as matched_entities, sum(m.count) as relevance_score
         ORDER BY relevance_score DESC
         LIMIT $limit
@@ -179,8 +181,10 @@ class GraphRetriever:
             fuzzy_query = """
             MATCH (e:Entity)-[m:MENTIONS]-(c:Chunk)
             WHERE any(name IN $entity_names WHERE e.name CONTAINS replace(name, ' ', '') OR replace(e.name, ' ', '') CONTAINS name)
+            OPTIONAL MATCH (d:Document {id: c.doc_id})
             RETURN DISTINCT c.id as chunk_id, c.doc_id as doc_id, c.text as text,
                    c.parent_id as parent_chunk_id, c.level as chunk_level,
+                   d.filename as filename,
                    collect(e.name) as matched_entities, sum(m.count) as relevance_score
             ORDER BY relevance_score DESC
             LIMIT $limit
