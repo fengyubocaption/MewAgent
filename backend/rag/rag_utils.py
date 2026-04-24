@@ -372,7 +372,9 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
         }
     """
     # 1. 向量检索（原有逻辑，已包含 auto_merge）
-    vector_result = retrieve_documents(query, top_k=top_k * 2)
+    # 多取一些向量结果用于与图谱结果融合，最终会在融合后截取 top_k
+    vector_top_k = min(top_k * 2, 20)  # 限制最大 20，避免过度检索
+    vector_result = retrieve_documents(query, top_k=vector_top_k)
     vector_docs = vector_result.get("docs", [])
     meta = vector_result.get("meta", {})
 
