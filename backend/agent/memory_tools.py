@@ -1,23 +1,6 @@
-"""类型化记忆工具 — 封装 LangMem，支持四类记忆分类。"""
-import uuid
+"""类型化记忆工具 — Agent 可调用的记忆存储/检索工具。"""
 from langchain_core.tools import tool
-from backend.agent.memory_manager import get_store, get_user_memories
-
-# 允许的记忆类型
-MEMORY_TYPES = ("user", "feedback", "project", "reference")
-
-
-def _save_memory(user_id: str, memory_type: str, content: str) -> str:
-    """内部方法：存储记忆到 LangMem Store。"""
-    if memory_type not in MEMORY_TYPES:
-        return f"错误：不支持的记忆类型 '{memory_type}'，允许值：{MEMORY_TYPES}"
-
-    store = get_store()
-    ns = ("memories", user_id, memory_type)
-    key = str(uuid.uuid4())
-
-    store.put(ns, key, {"content": content})
-    return f"已存储 {memory_type} 类型记忆"
+from backend.agent.memory_manager import save_memory, get_user_memories, MEMORY_TYPES
 
 
 def create_typed_memory_tools(user_id: str):
@@ -33,53 +16,53 @@ def create_typed_memory_tools(user_id: str):
 
     @tool
     def save_user_memory(content: str) -> str:
-        """存储用户偏好信息（如代码风格、回答详细程度偏好）。
+        """Store user preferences (e.g., coding style, response verbosity).
 
-        仅存储跨会话仍有价值的信息。
-        不要存储：文件路径、代码片段、临时状态、当前任务进度。
+        Only store information valuable across sessions.
+        DO NOT store: file paths, code snippets, temporary state, task progress.
         """
-        return _save_memory(user_id, "user", content)
+        return save_memory(user_id, "user", content)
 
     @tool
     def save_feedback_memory(content: str) -> str:
-        """存储用户纠正或验证过的做法。
+        """Store user corrections or validated approaches.
 
-        格式建议：规则 + Why + How to apply。
-        例如："不要在测试中使用 mock 数据库。Why: 曾导致生产环境故障。How to apply: 集成测试必须连真实数据库。"
+        Suggested format: Rule + Why + How to apply.
+        Example: "Don't use mock database in tests. Why: Caused production incident. How to apply: Integration tests must use real database."
         """
-        return _save_memory(user_id, "feedback", content)
+        return save_memory(user_id, "feedback", content)
 
     @tool
     def save_project_memory(content: str) -> str:
-        """存储项目级约定或决策背景。
+        """Store project-level conventions or decision context.
 
-        例如："auth 中间件重写是因为合规要求，不是技术债清理。"
+        Example: "Auth middleware rewrite was driven by compliance requirements, not tech debt cleanup."
         """
-        return _save_memory(user_id, "project", content)
+        return save_memory(user_id, "project", content)
 
     @tool
     def save_reference_memory(name: str, url: str, description: str) -> str:
-        """存储外部资源指针。
+        """Store external resource pointers.
 
-        例如：看板位置、监控面板 URL、文档链接。
+        Examples: Kanban board location, monitoring dashboard URL, documentation links.
         """
         content = f"{name}: {url} — {description}"
-        return _save_memory(user_id, "reference", content)
+        return save_memory(user_id, "reference", content)
 
     @tool
     def search_memories(query: str, memory_type: str | None = None) -> str:
-        """搜索已存储的记忆。
+        """Search stored memories.
 
         Args:
-            query: 搜索关键词
-            memory_type: 可选，限定类型 (user/feedback/project/reference)
+            query: Search keywords
+            memory_type: Optional, filter by type (user/feedback/project/reference)
         """
         if memory_type and memory_type not in MEMORY_TYPES:
-            return f"错误：不支持的记忆类型 '{memory_type}'，允许值：{MEMORY_TYPES}"
+            return f"Error: Unsupported memory type '{memory_type}'. Allowed: {MEMORY_TYPES}"
 
         result = get_user_memories(user_id, memory_type=memory_type, query=query)
         if not result:
-            return "未找到相关记忆"
+            return "No relevant memories found."
         return result
 
     return [save_user_memory, save_feedback_memory, save_project_memory,

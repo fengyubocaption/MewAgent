@@ -71,7 +71,12 @@ def emit_rag_step(icon: str, label: str, detail: str = ""):
 
 @tool("get_current_weather")
 def get_current_weather(location: str, extensions: Optional[str] = "base") -> str:
-    """获取天气信息"""
+    """Get weather information for a location.
+
+    Args:
+        location: City name or adcode
+        extensions: 'base' for current weather, 'all' for forecast
+    """
     if not location:
         return "location参数不能为空"
     if extensions not in ("base", "all"):
