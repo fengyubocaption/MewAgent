@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from backend.agent.agent import chat_with_agent_stream, storage
+from backend.middleware.rate_limit import rate_limit
 from backend.routes.auth import authenticate_user, create_access_token, get_current_user, get_db, get_password_hash, require_admin, resolve_role
 from backend.rag.document_loader import DocumentLoader
 from backend.milvus.embedding import embedding_service
@@ -50,7 +51,7 @@ milvus_writer = MilvusWriter(embedding_service=embedding_service, milvus_manager
 router = APIRouter()
 
 
-@router.post("/auth/register", response_model=AuthResponse)
+@router.post("/auth/register", response_model=AuthResponse, dependencies=[Depends(rate_limit("auth", 5, 60))])
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     username = (request.username or "").strip()
     password = (request.password or "").strip()
@@ -70,7 +71,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     return AuthResponse(access_token=token, username=username, role=role)
 
 
-@router.post("/auth/login", response_model=AuthResponse)
+@router.post("/auth/login", response_model=AuthResponse, dependencies=[Depends(rate_limit("auth", 5, 60))])
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
     user = authenticate_user(db, request.username, request.password)
     if not user:
@@ -84,7 +85,7 @@ async def me(current_user: User = Depends(get_current_user)):
     return CurrentUserResponse(username=current_user.username, role=current_user.role)
 
 
-@router.get("/sessions/{session_id}", response_model=SessionMessagesResponse)
+@router.get("/sessions/{session_id}", response_model=SessionMessagesResponse, dependencies=[Depends(rate_limit("read", 30, 60))])
 async def get_session_messages(session_id: str, current_user: User = Depends(get_current_user)):
     """获取指定会话的所有消息"""
     try:
@@ -102,7 +103,7 @@ async def get_session_messages(session_id: str, current_user: User = Depends(get
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/sessions", response_model=SessionListResponse)
+@router.get("/sessions", response_model=SessionListResponse, dependencies=[Depends(rate_limit("read", 30, 60))])
 async def list_sessions(current_user: User = Depends(get_current_user)):
     """获取当前用户的所有会话列表"""
     try:
@@ -127,7 +128,7 @@ async def delete_session(session_id: str, current_user: User = Depends(get_curre
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/chat/stream")
+@router.post("/chat/stream", dependencies=[Depends(rate_limit("chat", 20, 60))])
 async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depends(get_current_user)):
     """跟 Agent 对话 (流式)"""
 
@@ -151,7 +152,7 @@ async def chat_stream_endpoint(request: ChatRequest, current_user: User = Depend
     )
 
 
-@router.get("/documents", response_model=DocumentListResponse)
+@router.get("/documents", response_model=DocumentListResponse, dependencies=[Depends(rate_limit("read", 30, 60))])
 async def list_documents(_: User = Depends(require_admin)):
     """获取已上传的文档列表（管理员）"""
     try:
@@ -178,7 +179,7 @@ async def list_documents(_: User = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
 
 
-@router.post("/documents/upload", response_model=DocumentUploadResponse)
+@router.post("/documents/upload", response_model=DocumentUploadResponse, dependencies=[Depends(rate_limit("upload", 3, 60))])
 async def upload_document(file: UploadFile = File(...), _: User = Depends(require_admin)):
     """上传文档并进行 embedding（管理员）"""
     try:
