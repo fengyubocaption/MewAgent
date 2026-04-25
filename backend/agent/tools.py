@@ -139,7 +139,8 @@ def get_current_weather(location: str, extensions: Optional[str] = "base") -> st
 @tool("search_knowledge_base")
 def search_knowledge_base(query: str, top_k: int = 5) -> str:
     """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors).
-    Can be called multiple times per turn (max 3) to iteratively refine retrieval."""
+    The system automatically evaluates document relevance and rewrites query if needed.
+    Can be called multiple times per turn (max 3) to explore different perspectives."""
     try:
         state = _retrieval_state.get()
     except LookupError:
