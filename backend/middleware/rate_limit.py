@@ -13,6 +13,7 @@ from backend.db.cache import cache
 logger = logging.getLogger(__name__)
 
 # 限流配置
+# RATE_LIMIT_ENABLED: 设为 "false" 可全局禁用限流（默认启用）
 RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() != "false"
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
@@ -24,6 +25,10 @@ def get_client_ip(request: Request) -> str:
     """获取客户端真实 IP，支持反向代理场景。
 
     优先级：X-Forwarded-For > X-Real-IP > request.client.host
+
+    注意：此函数信任 X-Forwarded-For 和 X-Real-IP 头。
+    在生产环境中，请确保服务部署在受信任的反向代理（如 Nginx）之后，
+    否则恶意客户端可能伪造这些头来绕过限流。
     """
     # X-Forwarded-For 可能包含多个 IP，取第一个
     forwarded = request.headers.get("X-Forwarded-For")
