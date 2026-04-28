@@ -102,6 +102,10 @@ AMAP_API_KEY=
 # LANGCHAIN_API_KEY=
 # LANGCHAIN_PROJECT=supermew
 
+# ===== API 限流 (可选) =====
+# 是否启用限流，设为 false 可禁用（默认 true）
+# RATE_LIMIT_ENABLED=true
+
 ```
 
 ### 4) Docker 启动基础设施
@@ -134,6 +138,7 @@ backend/
 ├── app.py              — FastAPI 入口
 ├── routes/             — API 路由 (api.py, auth.py, schemas.py)
 ├── db/                 — 数据库模型、Redis 缓存
+├── middleware/         — 中间件（限流）
 ├── agent/              — LangGraph Agent、工具、记忆管理
 ├── rag/                — RAG Pipeline、分块、向量检索
 ├── milvus/             — Milvus 客户端、向量写入、Embedding
@@ -150,6 +155,7 @@ data/                   — bm25_state.json, 上传文档
 - **流式输出**：SSE + asyncio.Queue，跨线程 RAG 步骤实时推送
 - **LangMem 长期记忆**：用户画像、会话摘要、程序经验三类记忆，跨会话保留
 - **RBAC 鉴权**：JWT Bearer Token，admin/user 角色权限隔离
+- **API 限流**：基于 Redis 固定窗口限流，支持用户/IP 维度，反向代理场景自动识别真实 IP
 
 ## 目录详解
 
@@ -162,6 +168,9 @@ data/                   — bm25_state.json, 上传文档
 - `database.py` — SQLAlchemy 引擎、会话工厂
 - `models.py` — ORM 模型（用户、会话、消息、父文档）
 - `cache.py` — Redis JSON 缓存封装
+
+### backend/middleware/
+- `rate_limit.py` — Redis 固定窗口限流，支持用户/IP 维度
 
 ### backend/agent/
 - `agent.py` — LangGraph Agent、会话存储
@@ -245,6 +254,7 @@ data/                   — bm25_state.json, 上传文档
 | `AUTO_MERGE_THRESHOLD` | 合并阈值（子块数） | `2` |
 | `LEAF_RETRIEVE_LEVEL` | 检索叶子层级 | `3` |
 | `AMAP_API_KEY` | 高德天气 API 密钥 | - |
+| `RATE_LIMIT_ENABLED` | 是否启用 API 限流 | `true` |
 
 ## SSE 事件格式
 
