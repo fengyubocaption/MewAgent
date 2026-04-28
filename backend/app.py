@@ -6,6 +6,8 @@ import os
 
 from backend.routes import api as api_module
 from backend.db.database import init_db
+from backend.graph.neo4j_client import init_neo4j_schema
+from backend.rag.rag_utils import GRAPH_ENABLED
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -17,6 +19,8 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def _startup_init_db():
         init_db()
+        if GRAPH_ENABLED:
+            init_neo4j_schema()
 
     app.add_middleware(
         CORSMiddleware,
