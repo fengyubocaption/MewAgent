@@ -179,7 +179,7 @@ data/                   — bm25_state.json, 上传文档
 
 ### backend/agent/
 - `agent.py` — LangGraph Agent、会话存储
-- `tools.py` — 天气查询、知识库检索、实体关系查询工具
+- `tools.py` — 天气查询、知识库检索工具
 - `memory_manager.py` — LangMem 记忆管理
 - `memory_tools.py` — 记忆存储/检索工具
 
