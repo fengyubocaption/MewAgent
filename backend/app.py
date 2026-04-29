@@ -12,6 +12,10 @@ from backend.rag.rag_utils import GRAPH_ENABLED
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
+# CORS 配置：从环境变量读取允许的源列表
+# 开发环境使用 "*"，生产环境必须指定具体域名
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Cute Cat Bot API")
@@ -24,7 +28,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=CORS_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

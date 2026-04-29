@@ -179,6 +179,9 @@ async def list_documents(_: User = Depends(require_admin)):
         raise HTTPException(status_code=500, detail=f"获取文档列表失败: {str(e)}")
 
 
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+
+
 @router.post("/documents/upload", response_model=DocumentUploadResponse, dependencies=[Depends(rate_limit("upload", 3, 60))])
 async def upload_document(file: UploadFile = File(...), _: User = Depends(require_admin)):
     """上传文档并进行 embedding（管理员）"""
@@ -195,6 +198,13 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         ):
             raise HTTPException(status_code=400, detail="仅支持 PDF、Word 和 Excel 文档")
 
+        # 防止路径遍历攻击
+        import os as _os
+        safe_name = _os.path.basename(filename)
+        if not safe_name or safe_name.startswith('.'):
+            raise HTTPException(status_code=400, detail="无效的文件名")
+        filename = safe_name
+
         os.makedirs(UPLOAD_DIR, exist_ok=True)
 
         try:
@@ -203,9 +213,13 @@ async def upload_document(file: UploadFile = File(...), _: User = Depends(requir
         except Exception:
             pass
 
+        # 检查文件大小
+        content = await file.read(MAX_UPLOAD_SIZE + 1)
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_SIZE // 1024 // 1024}MB")
+
         file_path = UPLOAD_DIR / filename
         with open(file_path, "wb") as f:
-            content = await file.read()
             f.write(content)
 
         try:

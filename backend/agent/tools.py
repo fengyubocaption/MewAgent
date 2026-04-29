@@ -141,6 +141,9 @@ def search_knowledge_base(query: str, top_k: int = 5) -> str:
     """Search for information in the knowledge base using hybrid retrieval (dense + sparse vectors).
     The system automatically evaluates document relevance and rewrites query if needed.
     Can be called multiple times per turn (max 3) to explore different perspectives."""
+    # 限制 top_k 范围，防止资源滥用
+    top_k = max(1, min(top_k, 20))
+
     try:
         state = _retrieval_state.get()
     except LookupError:

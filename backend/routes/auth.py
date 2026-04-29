@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from backend.db.database import SessionLocal
 from backend.db.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable is required")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 ADMIN_INVITE_CODE = os.getenv("ADMIN_INVITE_CODE", "")

@@ -3,6 +3,7 @@ from collections import defaultdict
 from typing import List, Tuple, Dict, Any, Optional
 import os
 import json
+import threading
 import requests
 from dotenv import load_dotenv
 
@@ -30,6 +31,7 @@ _milvus_manager = MilvusManager()
 _parent_chunk_store = ParentChunkStore()
 
 _stepback_model = None
+_stepback_model_lock = threading.Lock()
 
 
 def _get_rerank_endpoint() -> str:
@@ -214,13 +216,15 @@ def _get_stepback_model():
     if not ARK_API_KEY or not MODEL:
         return None
     if _stepback_model is None:
-        _stepback_model = init_chat_model(
-            model=MODEL,
-            model_provider="openai",
-            api_key=ARK_API_KEY,
-            base_url=BASE_URL,
-            temperature=0.2,
-        )
+        with _stepback_model_lock:
+            if _stepback_model is None:
+                _stepback_model = init_chat_model(
+                    model=MODEL,
+                    model_provider="openai",
+                    api_key=ARK_API_KEY,
+                    base_url=BASE_URL,
+                    temperature=0.2,
+                )
     return _stepback_model
 
 

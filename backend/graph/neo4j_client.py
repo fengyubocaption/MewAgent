@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 # 默认配置
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "supermew2024")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+if not NEO4J_PASSWORD:
+    raise RuntimeError("NEO4J_PASSWORD environment variable is required")
 
 
 class Neo4jClient:

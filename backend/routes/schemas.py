@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 
@@ -28,7 +28,7 @@ class CurrentUserResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = "default_session"
+    session_id: Optional[str] = Field(default="default_session", max_length=120)
 
 
 class RetrievedChunk(BaseModel):

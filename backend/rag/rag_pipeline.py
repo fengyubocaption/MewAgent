@@ -1,5 +1,6 @@
 from typing import Literal, TypedDict, List, Optional
 import os
+import threading
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langgraph.graph import StateGraph, END
@@ -17,6 +18,7 @@ GRADE_MODEL = os.getenv("GRADE_MODEL", "gpt-4.1")
 
 _grader_model = None
 _router_model = None
+_model_lock = threading.Lock()
 
 
 def _get_grader_model():
@@ -24,14 +26,16 @@ def _get_grader_model():
     if not API_KEY or not GRADE_MODEL:
         return None
     if _grader_model is None:
-        _grader_model = init_chat_model(
-            model=GRADE_MODEL,
-            model_provider="openai",
-            api_key=API_KEY,
-            base_url=BASE_URL,
-            temperature=0,
-            stream_usage=True,
-        )
+        with _model_lock:
+            if _grader_model is None:
+                _grader_model = init_chat_model(
+                    model=GRADE_MODEL,
+                    model_provider="openai",
+                    api_key=API_KEY,
+                    base_url=BASE_URL,
+                    temperature=0,
+                    stream_usage=True,
+                )
     return _grader_model
 
 
@@ -40,14 +44,16 @@ def _get_router_model():
     if not API_KEY or not MODEL:
         return None
     if _router_model is None:
-        _router_model = init_chat_model(
-            model=MODEL,
-            model_provider="openai",
-            api_key=API_KEY,
-            base_url=BASE_URL,
-            temperature=0,
-            stream_usage=True,
-        )
+        with _model_lock:
+            if _router_model is None:
+                _router_model = init_chat_model(
+                    model=MODEL,
+                    model_provider="openai",
+                    api_key=API_KEY,
+                    base_url=BASE_URL,
+                    temperature=0,
+                    stream_usage=True,
+                )
     return _router_model
 
 

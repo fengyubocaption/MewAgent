@@ -32,7 +32,11 @@ class RedisCache:
     def set_json(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         try:
             payload = json.dumps(value, ensure_ascii=False)
-            self._get_client().setex(self._key(key), ttl or self.default_ttl, payload)
+            ttl_val = ttl if ttl is not None else self.default_ttl
+            if ttl_val <= 0:
+                self._get_client().set(self._key(key), payload)
+            else:
+                self._get_client().setex(self._key(key), ttl_val, payload)
         except Exception:
             return
 
@@ -43,11 +47,17 @@ class RedisCache:
             return
 
     def delete_pattern(self, pattern: str) -> None:
+        """使用 SCAN 替代 KEYS，避免 Redis 阻塞"""
         try:
             full_pattern = self._key(pattern)
-            keys = self._get_client().keys(full_pattern)
-            if keys:
-                self._get_client().delete(*keys)
+            client = self._get_client()
+            cursor = 0
+            while True:
+                cursor, keys = client.scan(cursor=cursor, match=full_pattern, count=100)
+                if keys:
+                    client.delete(*keys)
+                if cursor == 0:
+                    break
         except Exception:
             return
 
