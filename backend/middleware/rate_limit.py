@@ -1,4 +1,4 @@
-"""API 限流模块 — 基于 Redis 的固定窗口限流。"""
+"""API 限流模块 — 基于 Redis 的固定窗口限流，使用 Lua 脚本保证原子性。"""
 import logging
 import os
 import time
@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() != "false"
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+
+# Lua 脚本：原子性地执行 INCR + EXPIRE
+# KEYS[1]: 限流 key
+# ARGV[1]: 过期时间（秒）
+# 返回值: 当前计数
+_RATE_LIMIT_SCRIPT = """
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+"""
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
@@ -98,13 +110,9 @@ def rate_limit(group: str, max_requests: int, window_seconds: int = 60) -> Calla
         current_window = int(time.time()) // window_seconds
         key = f"{cache.key_prefix}:ratelimit:{group}:{identity}:{current_window}"
 
-        # 固定窗口计数（使用 pipeline 保证原子性）
+        # 固定窗口计数（使用 Lua 脚本保证原子性）
         try:
-            pipe = redis_client.pipeline()
-            pipe.incr(key)
-            pipe.expire(key, window_seconds)
-            results = pipe.execute()
-            count = results[0]
+            count = redis_client.eval(_RATE_LIMIT_SCRIPT, 1, key, window_seconds)
         except Exception as e:
             logger.error("Redis unavailable, allowing request: %s", e)
             return  # fail-open
