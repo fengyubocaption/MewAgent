@@ -14,6 +14,12 @@ API_KEY = os.getenv("ARK_API_KEY")
 MODEL = os.getenv("MODEL")
 BASE_URL = os.getenv("BASE_URL")
 
+# 实体扩展配置
+GRAPH_EXPANSION_ENABLED = os.getenv("GRAPH_EXPANSION_ENABLED", "true").lower() != "false"
+GRAPH_EXPANSION_HOPS = int(os.getenv("GRAPH_EXPANSION_HOPS", "1"))
+GRAPH_EXPANSION_MAX_NEIGHBORS = int(os.getenv("GRAPH_EXPANSION_MAX_NEIGHBORS", "5"))
+GRAPH_EXPANSION_SCORE_MULTIPLIER = float(os.getenv("GRAPH_EXPANSION_SCORE_MULTIPLIER", "0.6"))
+
 # 实体识别 Prompt
 ENTITY_RECOGNITION_PROMPT = """从用户问题中识别可能涉及的实体名称。
 
@@ -125,6 +131,47 @@ class GraphRetriever:
         """
         return self.neo4j.run_query(query, {"name": entity_name})
 
+    def expand_entities(
+        self,
+        entity_names: list[str],
+        hops: int = None,
+        max_neighbors: int = None,
+    ) -> tuple[list[str], dict[str, str]]:
+        """通过 RELATED_TO 边扩展实体集合。
+
+        Returns:
+            (expanded_entity_names, provenance_map)
+            provenance_map: {entity_name: "direct" | "expanded:source_entity"}
+        """
+        if not GRAPH_EXPANSION_ENABLED or not entity_names:
+            return list(entity_names), {e: "direct" for e in entity_names}
+
+        hops = hops if hops is not None else GRAPH_EXPANSION_HOPS
+        max_neighbors = max_neighbors if max_neighbors is not None else GRAPH_EXPANSION_MAX_NEIGHBORS
+
+        provenance_map = {e: "direct" for e in entity_names}
+        all_entities = set(entity_names)
+
+        for source_entity in entity_names:
+            try:
+                neighbors = self.get_entity_neighbors(source_entity, max_depth=hops)
+                neighbors.sort(key=lambda x: x.get("distance", 1))
+                for neighbor in neighbors[:max_neighbors]:
+                    neighbor_name = neighbor.get("name")
+                    if neighbor_name and neighbor_name not in all_entities:
+                        all_entities.add(neighbor_name)
+                        provenance_map[neighbor_name] = f"expanded:{source_entity}"
+            except Exception as e:
+                logger.debug(f"实体扩展失败 ({source_entity}): {e}")
+                continue
+
+        expanded_list = list(all_entities)
+        logger.debug(
+            f"实体扩展: {entity_names} -> {expanded_list} "
+            f"(+{len(expanded_list) - len(entity_names)} 扩展)"
+        )
+        return expanded_list, provenance_map
+
     def multi_hop_query(self, entity_a: str, entity_b: str, max_hops: int = 3) -> list[dict]:
         """查询两个实体之间的关系路径"""
         query = f"""
@@ -194,43 +241,77 @@ class GraphRetriever:
         return results
 
     def retrieve_by_query(self, query: str, top_k: int = 5) -> dict:
-        """根据用户问题检索相关 chunks
+        """根据用户问题检索相关 chunks，支持实体扩展
 
         Returns:
             {
-                "entities": [识别到的实体名称],
-                "chunks": [{chunk_id, text, doc_id, matched_entities, ...}],
+                "entities": [LLM 识别的实体名称],
+                "expanded_entities": [通过 RELATED_TO 扩展的实体],
+                "provenance": {entity: "direct" | "expanded:source"},
+                "chunks": [{chunk_id, text, graph_score, matched_via_expansion, ...}],
                 "graph_enabled": bool,
             }
         """
-        # 检查 Neo4j 连接
         if not self.neo4j.is_connected():
             logger.warning("Neo4j 未连接，跳过图谱检索")
-            return {"entities": [], "chunks": [], "graph_enabled": False}
+            return {
+                "entities": [], "expanded_entities": [], "provenance": {},
+                "chunks": [], "graph_enabled": False,
+            }
 
         try:
             # 1. 识别问题中的实体
             entities = self.extract_query_entities(query)
 
             if not entities:
-                return {"entities": [], "chunks": [], "graph_enabled": True}
+                return {
+                    "entities": [], "expanded_entities": [], "provenance": {},
+                    "chunks": [], "graph_enabled": True,
+                }
 
             logger.debug(f"识别到实体: {entities}")
 
-            # 2. 根据实体获取 chunks
-            chunks = self.get_chunks_by_entities(entities, limit=top_k * 2)
+            # 2. 通过 RELATED_TO 边扩展实体集合
+            expanded_entities, provenance_map = self.expand_entities(entities)
+            expanded_only = [e for e in expanded_entities if e not in entities]
 
-            # 3. 为每个 chunk 添加来源标记
+            # 3. 用扩展后的实体集获取 chunks
+            chunks = self.get_chunks_by_entities(expanded_entities, limit=top_k * 3)
+
+            # 4. 为每个 chunk 添加来源标记和扩展感知评分
             for chunk in chunks:
                 chunk["source"] = "graph"
-                chunk["graph_score"] = chunk.pop("relevance_score", 0)
+                raw_score = chunk.pop("relevance_score", 0)
+                matched = chunk.get("matched_entities", [])
+
+                has_direct = any(provenance_map.get(e) == "direct" for e in matched)
+                has_expanded = any(
+                    provenance_map.get(e, "").startswith("expanded") for e in matched
+                )
+
+                if has_direct:
+                    chunk["graph_score"] = raw_score
+                    chunk["matched_via_expansion"] = False
+                elif has_expanded:
+                    chunk["graph_score"] = raw_score * GRAPH_EXPANSION_SCORE_MULTIPLIER
+                    chunk["matched_via_expansion"] = True
+                else:
+                    chunk["graph_score"] = raw_score
+                    chunk["matched_via_expansion"] = False
+
+            chunks.sort(key=lambda c: c.get("graph_score", 0), reverse=True)
 
             return {
                 "entities": entities,
+                "expanded_entities": expanded_only,
+                "provenance": provenance_map,
                 "chunks": chunks[:top_k],
                 "graph_enabled": True,
             }
 
         except Exception as e:
             logger.warning(f"图谱检索失败: {e}")
-            return {"entities": [], "chunks": [], "graph_enabled": True, "error": str(e)}
+            return {
+                "entities": [], "expanded_entities": [], "provenance": {},
+                "chunks": [], "graph_enabled": True, "error": str(e),
+            }

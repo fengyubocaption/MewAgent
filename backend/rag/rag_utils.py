@@ -412,6 +412,8 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
     meta["graph_enabled"] = True
     meta["graph_entities"] = graph_result.get("entities", [])
     meta["graph_chunk_count"] = len(graph_docs)
+    meta["graph_expanded_entities"] = graph_result.get("expanded_entities", [])
+    meta["graph_expansion_applied"] = bool(graph_result.get("expanded_entities"))
 
     # 3. 对图谱结果应用 auto_merge（与向量检索保持一致）
     if graph_docs:
@@ -439,9 +441,11 @@ def retrieve_documents_with_graph(query: str, top_k: int = 5) -> Dict[str, Any]:
             doc["source"] = "graph"
             merged.append(doc)
 
-    # 5. 排序（优先向量 rerank_score，其次图谱 graph_score）
+    # 5. 排序（优先向量 rerank_score，其次图谱 graph_score；扩展匹配额外降权）
     def sort_key(doc):
         score = doc.get("rerank_score") or doc.get("score") or doc.get("graph_score") or 0
+        if doc.get("matched_via_expansion") and not doc.get("rerank_score") and not doc.get("score"):
+            score *= 0.9
         return -score if isinstance(score, (int, float)) else 0
 
     merged.sort(key=sort_key)

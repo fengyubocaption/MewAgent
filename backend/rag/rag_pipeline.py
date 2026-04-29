@@ -135,10 +135,13 @@ def retrieve_initial(state: RAGState) -> RAGState:
     )
     # 图谱检索信息
     if retrieve_meta.get("graph_enabled"):
+        direct = retrieve_meta.get("graph_entities", [])
+        expanded = retrieve_meta.get("graph_expanded_entities", [])
+        expand_info = f"，扩展实体: {', '.join(expanded)}" if expanded else ""
         emit_rag_step(
             "🕸️",
             "知识图谱检索",
-            f"识别实体: {', '.join(retrieve_meta.get('graph_entities', [])) or '无'}，"
+            f"识别实体: {', '.join(direct) or '无'}{expand_info}，"
             f"图谱召回: {retrieve_meta.get('graph_chunk_count', 0)} 片段",
         )
     emit_rag_step("✅", f"检索完成，找到 {len(results)} 个片段", f"模式: {retrieve_meta.get('retrieval_mode', 'hybrid')}")

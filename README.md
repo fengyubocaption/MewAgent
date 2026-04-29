@@ -78,6 +78,11 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=
 # 是否启用图谱功能，false 则跳过图谱构建和检索
 GRAPH_ENABLED=true
+# 实体扩展：通过 RELATED_TO 边扩展查询实体集合
+# GRAPH_EXPANSION_ENABLED=true
+# GRAPH_EXPANSION_HOPS=1
+# GRAPH_EXPANSION_MAX_NEIGHBORS=5
+# GRAPH_EXPANSION_SCORE_MULTIPLIER=0.6
 
 # ===== BM25 稀疏检索 (可选) =====
 # BM25 状态文件路径，存储词表和文档频次统计，默认 data/bm25_state.json
@@ -150,7 +155,7 @@ data/                   — bm25_state.json, 上传文档
 
 **核心能力：**
 - **混合检索**：稠密向量 (BAAI/bge-m3) + BM25 稀疏向量 → Milvus RRF 融合 → Jina Rerank 精排
-- **Graph RAG**：Neo4j 知识图谱存储实体关系，LLM 抽取，向量+图谱并行融合检索，多跳推理
+- **Graph RAG**：Neo4j 知识图谱存储实体关系，LLM 抽取，向量+图谱并行融合检索，实体扩展+多跳推理
 - **三级分块 + Auto-merging**：L1/L2 父块存 PostgreSQL，L3 叶子块入 Milvus，检索时自动合并
 - **流式输出**：SSE + asyncio.Queue，跨线程 RAG 步骤实时推送
 - **LangMem 长期记忆**：用户画像、会话摘要、程序经验三类记忆，跨会话保留
@@ -174,7 +179,7 @@ data/                   — bm25_state.json, 上传文档
 
 ### backend/agent/
 - `agent.py` — LangGraph Agent、会话存储
-- `tools.py` — 天气查询、知识库检索工具
+- `tools.py` — 天气查询、知识库检索、实体关系查询工具
 - `memory_manager.py` — LangMem 记忆管理
 - `memory_tools.py` — 记忆存储/检索工具
 
@@ -192,7 +197,7 @@ data/                   — bm25_state.json, 上传文档
 ### backend/graph/
 - `neo4j_client.py` — Neo4j 连接管理
 - `graph_builder.py` — 实体抽取、关系构建
-- `graph_retriever.py` — 图谱检索、多跳查询
+- `graph_retriever.py` — 图谱检索、实体扩展、多跳查询
 
 ## 核心流程
 
@@ -204,7 +209,7 @@ data/                   — bm25_state.json, 上传文档
 5. 消息持久化到 PostgreSQL，Redis 缓存热点会话
 
 ### RAG Pipeline
-1. **检索**：Milvus Hybrid (Dense + Sparse + RRF) → Jina Rerank 精排 → Auto-merging 合并父块
+1. **检索**：Milvus Hybrid (Dense + Sparse + RRF) + Neo4j 图谱（实体扩展 via RELATED_TO）→ 并行融合 → Jina Rerank 精排 → Auto-merging 合并父块
 2. **评分**：LLM 判断文档相关性，不相关则触发查询重写
 3. **重写**：Step-Back / HyDE 策略生成扩展查询
 4. **再检索**：对重写查询再次检索，返回上下文
@@ -249,6 +254,10 @@ data/                   — bm25_state.json, 上传文档
 | `JWT_EXPIRE_MINUTES` | Token 有效期（分钟） | `1440` |
 | `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` | Neo4j 图谱连接 | - |
 | `GRAPH_ENABLED` | 是否启用图谱功能 | `true` |
+| `GRAPH_EXPANSION_ENABLED` | 是否启用实体扩展检索 | `true` |
+| `GRAPH_EXPANSION_HOPS` | 实体扩展跳数 | `1` |
+| `GRAPH_EXPANSION_MAX_NEIGHBORS` | 每个实体最多扩展邻居数 | `5` |
+| `GRAPH_EXPANSION_SCORE_MULTIPLIER` | 扩展匹配分数折扣 | `0.6` |
 | `BM25_STATE_PATH` | BM25 统计文件路径 | `data/bm25_state.json` |
 | `AUTO_MERGE_ENABLED` | 是否启用自动合并 | `true` |
 | `AUTO_MERGE_THRESHOLD` | 合并阈值（子块数） | `2` |
@@ -269,7 +278,7 @@ data/                   — bm25_state.json, 上传文档
 
 - **后端**：FastAPI, LangChain/LangGraph, SQLAlchemy, PostgreSQL, Redis
 - **向量**：Milvus (HNSW + SPARSE_INVERTED_INDEX), RRF 融合, Jina Rerank
-- **图谱**：Neo4j, 实体抽取, 多跳查询
+- **图谱**：Neo4j, 实体抽取, 实体扩展 (RELATED_TO), 多跳查询
 - **Embedding**：BAAI/bge-m3 + 自定义 BM25
 - **前端**：Vue 3 (CDN), marked, highlight.js
 - **记忆**：LangMem

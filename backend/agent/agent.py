@@ -6,7 +6,7 @@ import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
-from backend.agent.tools import get_current_weather, search_knowledge_base, init_retrieval_state, set_rag_step_queue, _retrieval_state
+from backend.agent.tools import get_current_weather, search_knowledge_base, search_entity_relationship, init_retrieval_state, set_rag_step_queue, _retrieval_state
 from datetime import datetime
 from backend.db.cache import cache
 from backend.db.database import SessionLocal
@@ -370,6 +370,14 @@ def _build_system_prompt(user_memories: str) -> str:
         "5. Multiple retrieval results are automatically deduplicated and accumulated\n"
         "6. Never fabricate information not present in the knowledge base\n"
         "\n"
+        "## Entity Relationship Exploration\n"
+        "WHEN TO CALL search_entity_relationship TOOL:\n"
+        "- User asks how two things are related (e.g., 'A and B有什么关系?')\n"
+        "- User asks what is associated with an entity (e.g., '哪些框架使用Python?')\n"
+        "- User asks about connections between concepts (e.g., '微服务和Docker有什么联系?')\n"
+        "- The tool traverses the knowledge graph's RELATED_TO edges\n"
+        "- Can be used alongside search_knowledge_base for comprehensive answers\n"
+        "\n"
         "## Memory Tools - CRITICAL\n"
         "WHEN TO CALL save_user_memory TOOL:\n"
         "- User explicitly says 'remember' / '请记住' / '记住'\n"
@@ -424,7 +432,7 @@ def create_agent_with_memory(user_id: str):
 
     agent = create_agent(
         model=model,
-        tools=[get_current_weather, search_knowledge_base] + typed_tools,
+        tools=[get_current_weather, search_knowledge_base, search_entity_relationship] + typed_tools,
         system_prompt=_build_system_prompt(user_memories),
     )
     return agent, model
