@@ -19,6 +19,15 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 Base = declarative_base()
 
 
+def get_db():
+    """FastAPI 依赖：获取数据库会话。"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 def init_db() -> None:
     # Delayed import to avoid circular dependency.
     from backend.db import models  # noqa: F401

@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from backend.rag.rag_utils import retrieve_documents, retrieve_documents_with_graph, step_back_expand, generate_hypothetical_document
-from backend.agent.tools import emit_rag_step
+from backend.core.progress import emit_rag_step
 
 load_dotenv()
 

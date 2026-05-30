@@ -6,7 +6,8 @@ import asyncio
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk, SystemMessage
-from backend.agent.tools import get_current_weather, search_knowledge_base, init_retrieval_state, set_rag_step_queue, _retrieval_state
+from backend.agent.tools import get_current_weather, search_knowledge_base
+from backend.core.progress import init_retrieval_state, set_rag_step_queue, _retrieval_state
 from datetime import datetime
 from backend.db.cache import cache
 from backend.db.database import SessionLocal

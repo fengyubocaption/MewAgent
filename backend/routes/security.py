@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from backend.db.database import SessionLocal
+from backend.db.database import get_db
 from backend.db.models import User
 
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
@@ -21,14 +21,6 @@ ADMIN_INVITE_CODE = os.getenv("ADMIN_INVITE_CODE", "")
 PBKDF2_ROUNDS = int(os.getenv("PASSWORD_PBKDF2_ROUNDS", "310000"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
