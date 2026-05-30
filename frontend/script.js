@@ -26,7 +26,35 @@ createApp({
                 role: 'user',
                 admin_code: ''
             },
-            authLoading: false
+            authLoading: false,
+            // Resume
+            resumes: [],
+            resumesLoading: false,
+            selectedResumeFile: null,
+            isUploadingResume: false,
+            resumeUploadProgress: '',
+            resumeDetail: null,
+            // JD
+            jds: [],
+            jdsLoading: false,
+            jdForm: { title: '', company: '', jd_text: '' },
+            isCreatingJD: false,
+            jdCreateProgress: '',
+            jdDetail: null,
+            matchResumeId: '',
+            isMatching: false,
+            matchResult: '',
+            // Mock Interview
+            mockInterview: {
+                jdId: '',
+                type: '综合面',
+                loading: false,
+                questions: '',
+                answer: '',
+                questionText: '',
+                evaluating: false,
+                evaluation: ''
+            }
         };
     },
     computed: {
@@ -150,6 +178,13 @@ createApp({
             this.messages = [];
             this.sessions = [];
             this.documents = [];
+            this.resumes = [];
+            this.jds = [];
+            this.resumeDetail = null;
+            this.jdDetail = null;
+            this.matchResult = '';
+            this.mockInterview.questions = '';
+            this.mockInterview.evaluation = '';
             this.activeNav = 'newChat';
             this.showHistorySidebar = false;
             localStorage.removeItem('accessToken');
@@ -501,6 +536,294 @@ createApp({
                 return 'fas fa-file-excel';
             }
             return 'fas fa-file';
+        },
+
+        // ==================== Resume ====================
+        async handleResume() {
+            if (!this.isAuthenticated) return;
+            this.activeNav = 'resume';
+            this.showHistorySidebar = false;
+            this.resumeDetail = null;
+            await this.loadResumes();
+        },
+
+        async loadResumes() {
+            this.resumesLoading = true;
+            try {
+                const response = await this.authFetch('/resume');
+                if (!response.ok) throw new Error('加载失败');
+                const data = await response.json();
+                this.resumes = data.resumes;
+            } catch (error) {
+                alert('加载简历列表失败：' + error.message);
+            } finally {
+                this.resumesLoading = false;
+            }
+        },
+
+        handleResumeFileSelect(event) {
+            const files = event.target.files;
+            if (files && files.length > 0) {
+                this.selectedResumeFile = files[0];
+                this.resumeUploadProgress = '';
+            }
+        },
+
+        async uploadResume() {
+            if (!this.selectedResumeFile) return;
+            this.isUploadingResume = true;
+            this.resumeUploadProgress = '正在上传并解析...';
+            try {
+                const formData = new FormData();
+                formData.append('file', this.selectedResumeFile);
+                const response = await this.authFetch('/resume/upload', { method: 'POST', body: formData });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.detail || '上传失败');
+                }
+                const data = await response.json();
+                this.resumeUploadProgress = data.message;
+                this.selectedResumeFile = null;
+                if (this.$refs.resumeFileInput) this.$refs.resumeFileInput.value = '';
+                await this.loadResumes();
+                setTimeout(() => { this.resumeUploadProgress = ''; }, 3000);
+            } catch (error) {
+                this.resumeUploadProgress = '上传失败：' + error.message;
+            } finally {
+                this.isUploadingResume = false;
+            }
+        },
+
+        async viewResumeDetail(id) {
+            try {
+                const response = await this.authFetch(`/resume/${id}`);
+                if (!response.ok) throw new Error('加载失败');
+                this.resumeDetail = await response.json();
+            } catch (error) {
+                alert('加载简历详情失败：' + error.message);
+            }
+        },
+
+        async deleteResume(id) {
+            if (!confirm('确定要删除这份简历吗？')) return;
+            try {
+                const response = await this.authFetch(`/resume/${id}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('删除失败');
+                this.resumes = this.resumes.filter(r => r.id !== id);
+                if (this.resumeDetail?.id === id) this.resumeDetail = null;
+            } catch (error) {
+                alert('删除简历失败：' + error.message);
+            }
+        },
+
+        // ==================== JD ====================
+        async handleJD() {
+            if (!this.isAuthenticated) return;
+            this.activeNav = 'jd';
+            this.showHistorySidebar = false;
+            this.jdDetail = null;
+            this.matchResult = '';
+            await this.loadJDs();
+            await this.loadResumes(); // for match selector
+        },
+
+        async loadJDs() {
+            this.jdsLoading = true;
+            try {
+                const response = await this.authFetch('/jd');
+                if (!response.ok) throw new Error('加载失败');
+                const data = await response.json();
+                this.jds = data.job_descriptions;
+            } catch (error) {
+                alert('加载 JD 列表失败：' + error.message);
+            } finally {
+                this.jdsLoading = false;
+            }
+        },
+
+        async createJD() {
+            const jdText = this.jdForm.jd_text.trim();
+            if (!jdText || jdText.length < 20) {
+                alert('请输入完整的职位描述（至少20字）');
+                return;
+            }
+            this.isCreatingJD = true;
+            this.jdCreateProgress = '正在分析...';
+            try {
+                const response = await this.authFetch('/jd', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.jdForm)
+                });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.detail || '创建失败');
+                }
+                const data = await response.json();
+                this.jdCreateProgress = data.message;
+                this.jdForm = { title: '', company: '', jd_text: '' };
+                await this.loadJDs();
+                setTimeout(() => { this.jdCreateProgress = ''; }, 3000);
+            } catch (error) {
+                this.jdCreateProgress = '创建失败：' + error.message;
+            } finally {
+                this.isCreatingJD = false;
+            }
+        },
+
+        async viewJDDetail(id) {
+            try {
+                const response = await this.authFetch(`/jd/${id}`);
+                if (!response.ok) throw new Error('加载失败');
+                this.jdDetail = await response.json();
+                this.matchResult = '';
+                this.matchResumeId = '';
+            } catch (error) {
+                alert('加载 JD 详情失败：' + error.message);
+            }
+        },
+
+        async deleteJD(id) {
+            if (!confirm('确定要删除这个 JD 吗？')) return;
+            try {
+                const response = await this.authFetch(`/jd/${id}`, { method: 'DELETE' });
+                if (!response.ok) throw new Error('删除失败');
+                this.jds = this.jds.filter(j => j.id !== id);
+                if (this.jdDetail?.id === id) this.jdDetail = null;
+            } catch (error) {
+                alert('删除 JD 失败：' + error.message);
+            }
+        },
+
+        async runMatch() {
+            if (!this.matchResumeId || !this.jdDetail) return;
+            this.isMatching = true;
+            this.matchResult = '';
+            try {
+                const msg = `请分析简历(ID:${this.matchResumeId})与JD(ID:${this.jdDetail.id})的匹配度`;
+                const response = await this.authFetch('/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, session_id: this.sessionId })
+                });
+                if (!response.ok) throw new Error('匹配分析失败');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let eventEndIndex;
+                    while ((eventEndIndex = buffer.indexOf('\n\n')) !== -1) {
+                        const eventStr = buffer.slice(0, eventEndIndex);
+                        buffer = buffer.slice(eventEndIndex + 2);
+                        if (eventStr.startsWith('data: ')) {
+                            const dataStr = eventStr.slice(6);
+                            if (dataStr === '[DONE]') continue;
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.type === 'content') this.matchResult += data.content;
+                            } catch (e) {}
+                        }
+                    }
+                }
+            } catch (error) {
+                this.matchResult = '匹配分析失败：' + error.message;
+            } finally {
+                this.isMatching = false;
+            }
+        },
+
+        // ==================== Mock Interview ====================
+        async handleMockInterview() {
+            if (!this.isAuthenticated) return;
+            this.activeNav = 'mockInterview';
+            this.showHistorySidebar = false;
+            if (this.jds.length === 0) await this.loadJDs();
+        },
+
+        async startMockInterview() {
+            if (!this.mockInterview.jdId) return;
+            this.mockInterview.loading = true;
+            this.mockInterview.questions = '';
+            this.mockInterview.evaluation = '';
+            this.mockInterview.answer = '';
+            this.mockInterview.questionText = '';
+            try {
+                const msg = `请根据JD(ID:${this.mockInterview.jdId})生成${this.mockInterview.type}面试题`;
+                const response = await this.authFetch('/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, session_id: this.sessionId })
+                });
+                if (!response.ok) throw new Error('生成面试题失败');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let eventEndIndex;
+                    while ((eventEndIndex = buffer.indexOf('\n\n')) !== -1) {
+                        const eventStr = buffer.slice(0, eventEndIndex);
+                        buffer = buffer.slice(eventEndIndex + 2);
+                        if (eventStr.startsWith('data: ')) {
+                            const dataStr = eventStr.slice(6);
+                            if (dataStr === '[DONE]') continue;
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.type === 'content') this.mockInterview.questions += data.content;
+                            } catch (e) {}
+                        }
+                    }
+                }
+            } catch (error) {
+                this.mockInterview.questions = '生成失败：' + error.message;
+            } finally {
+                this.mockInterview.loading = false;
+            }
+        },
+
+        async evaluateAnswer() {
+            if (!this.mockInterview.answer || !this.mockInterview.questionText) return;
+            this.mockInterview.evaluating = true;
+            this.mockInterview.evaluation = '';
+            try {
+                const msg = `请评估我对这道面试题的回答。\n\n题目：${this.mockInterview.questionText}\n\n我的回答：${this.mockInterview.answer}`;
+                const response = await this.authFetch('/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, session_id: this.sessionId })
+                });
+                if (!response.ok) throw new Error('评估失败');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let eventEndIndex;
+                    while ((eventEndIndex = buffer.indexOf('\n\n')) !== -1) {
+                        const eventStr = buffer.slice(0, eventEndIndex);
+                        buffer = buffer.slice(eventEndIndex + 2);
+                        if (eventStr.startsWith('data: ')) {
+                            const dataStr = eventStr.slice(6);
+                            if (dataStr === '[DONE]') continue;
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.type === 'content') this.mockInterview.evaluation += data.content;
+                            } catch (e) {}
+                        }
+                    }
+                }
+            } catch (error) {
+                this.mockInterview.evaluation = '评估失败：' + error.message;
+            } finally {
+                this.mockInterview.evaluating = false;
+            }
         }
     },
     watch: {

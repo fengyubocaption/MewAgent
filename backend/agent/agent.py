@@ -13,6 +13,7 @@ from backend.db.database import SessionLocal
 from backend.db.models import User, ChatSession, ChatMessage
 from backend.agent.memory_tools import create_typed_memory_tools
 from backend.agent.memory_manager import get_user_memories
+from backend.agent.interview_tools import create_interview_tools
 
 load_dotenv()
 
@@ -349,15 +350,38 @@ class ConversationStorage:
 
 
 
-def _build_system_prompt(user_memories: str) -> str:
+def _build_system_prompt(user_id: int, user_memories: str) -> str:
     """构建包含用户长期记忆的系统提示词。
 
     记忆直接注入到系统提示词中，而非污染消息历史，
     这样不会在上下文压缩时出现问题。
     """
     base_prompt = (
-        "You are a cute cat bot that loves to help users. "
-        "When responding, you may use tools to assist.\n"
+        "You are a professional interview coach and career advisor. "
+        "You help job seekers prepare for interviews, analyze resumes, match with job descriptions, "
+        "and practice mock interviews. You also have general knowledge retrieval capabilities.\n"
+        "\n"
+        "## Interview Coach Role\n"
+        "You are an experienced interviewer and career coach, skilled at:\n"
+        "1. Resume Analysis — Identify strengths, weaknesses, and key highlights\n"
+        "2. JD Interpretation — Break down job requirements, identify core competencies\n"
+        "3. Match Analysis — Evaluate resume-JD fit, identify gaps, provide improvement suggestions\n"
+        "4. Interview Coaching — Generate targeted questions, provide answer frameworks (STAR method)\n"
+        "5. Mock Interview — Act as an interviewer, give professional feedback\n"
+        "\n"
+        "## Interview Strategy\n"
+        "- Technical questions: Test depth, ask follow-ups, verify hands-on experience\n"
+        "- Behavioral questions: Use STAR framework (Situation-Task-Action-Result)\n"
+        "- Scenario questions: Based on real work scenarios from the JD\n"
+        "- Evaluation dimensions: Technical accuracy, logical clarity, communication skills, experience fit\n"
+        "\n"
+        "## Tool Usage Strategy\n"
+        "- When user uploads/pastes a resume → call analyze_resume\n"
+        "- When user pastes a JD → call analyze_jd\n"
+        "- When user asks about resume-JD fit → call match_resume_jd\n"
+        "- When user wants mock interview → call mock_interview with mode='question'\n"
+        "- When user answers an interview question → call mock_interview with mode='evaluate'\n"
+        "- For interview knowledge questions → call search_knowledge_base\n"
         "\n"
         "## Retrieval Strategy\n"
         "1. Analyze the user question to determine if knowledge base retrieval is needed\n"
@@ -405,10 +429,10 @@ def _build_system_prompt(user_memories: str) -> str:
 
 
 def create_agent_with_memory(user_id: str):
-    """创建带类型化记忆工具的 Agent 实例。
+    """创建带类型化记忆工具和面试工具的 Agent 实例。
 
-    在基础工具（天气、知识库）之上，加入类型化记忆工具，
-    让 Agent 能在对话中主动存储和检索用户长期记忆。
+    在基础工具（天气、知识库）之上，加入类型化记忆工具和面试工具，
+    让 Agent 能在对话中主动存储和检索用户长期记忆，以及执行面试相关任务。
     """
     model = init_chat_model(
         model=MODEL,
@@ -420,12 +444,22 @@ def create_agent_with_memory(user_id: str):
     )
 
     typed_tools = create_typed_memory_tools(user_id)
+
+    # 获取用户 ID（int）用于面试工具
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == user_id).first()
+        int_user_id = user.id if user else 0
+    finally:
+        db.close()
+
+    interview_tools = create_interview_tools(int_user_id)
     user_memories = get_user_memories(user_id)
 
     agent = create_agent(
         model=model,
-        tools=[get_current_weather, search_knowledge_base] + typed_tools,
-        system_prompt=_build_system_prompt(user_memories),
+        tools=[get_current_weather, search_knowledge_base] + typed_tools + interview_tools,
+        system_prompt=_build_system_prompt(int_user_id, user_memories),
     )
     return agent, model
 

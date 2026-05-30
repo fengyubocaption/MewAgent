@@ -125,3 +125,78 @@ class DocumentDeleteResponse(BaseModel):
     filename: str
     chunks_deleted: int
     message: str
+
+
+# ---------- 面试助手相关 Schema ----------
+
+class ResumeInfo(BaseModel):
+    id: int
+    filename: str
+    structured_data: Optional[dict] = None
+    created_at: str
+    updated_at: str
+
+
+class ResumeListResponse(BaseModel):
+    resumes: List[ResumeInfo]
+
+
+class ResumeDetailResponse(BaseModel):
+    id: int
+    filename: str
+    raw_text: str
+    structured_data: Optional[dict] = None
+    created_at: str
+    updated_at: str
+
+
+class ResumeUploadResponse(BaseModel):
+    id: int
+    filename: str
+    message: str
+
+
+class ResumeDeleteResponse(BaseModel):
+    id: int
+    message: str
+
+
+class JDCreateRequest(BaseModel):
+    title: str = ""
+    company: str = ""
+    jd_text: str
+
+
+class JDInfo(BaseModel):
+    id: int
+    title: str
+    company: str
+    structured_data: Optional[dict] = None
+    created_at: str
+    updated_at: str
+
+
+class JDListResponse(BaseModel):
+    job_descriptions: List[JDInfo]
+
+
+class JDDetailResponse(BaseModel):
+    id: int
+    title: str
+    company: str
+    raw_text: str
+    structured_data: Optional[dict] = None
+    created_at: str
+    updated_at: str
+
+
+class JDCreateResponse(BaseModel):
+    id: int
+    title: str
+    company: str
+    message: str
+
+
+class JDDeleteResponse(BaseModel):
+    id: int
+    message: str

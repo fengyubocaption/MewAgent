@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>喵喵智能助手</title>
+    <title>面试求职助手</title>
     <link rel="stylesheet" href="style.css">
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Zcool+KuaiLe&display=swap" rel="stylesheet">
@@ -24,17 +24,26 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="logo-icon">🐱</div>
-                <h2>喵喵助手</h2>
+                <h2>面试助手</h2>
             </div>
             <nav class="sidebar-nav">
                 <button @click="handleNewChat" :class="['nav-btn', {active: activeNav === 'newChat'}]">
-                    <i class="fas fa-plus"></i> 新建会话
+                    <i class="fas fa-comments"></i> 面试问答
+                </button>
+                <button @click="handleResume" :class="['nav-btn', {active: activeNav === 'resume'}]">
+                    <i class="fas fa-file-alt"></i> 简历管理
+                </button>
+                <button @click="handleJD" :class="['nav-btn', {active: activeNav === 'jd'}]">
+                    <i class="fas fa-briefcase"></i> JD 分析
+                </button>
+                <button @click="handleMockInterview" :class="['nav-btn', {active: activeNav === 'mockInterview'}]">
+                    <i class="fas fa-microphone"></i> 模拟面试
                 </button>
                 <button @click="handleHistory" :class="['nav-btn', {active: activeNav === 'history'}]">
                     <i class="fas fa-history"></i> 历史记录
                 </button>
                 <button v-if="isAdmin" @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
-                    <i class="fas fa-cog"></i> 设置
+                    <i class="fas fa-cog"></i> 知识库管理
                 </button>
             </nav>
             <div class="sidebar-footer">
@@ -54,8 +63,8 @@
         <!-- Main Chat Area -->
         <main class="main-content">
             <div v-if="!isAuthenticated" class="auth-panel">
-                <h2>{{ authMode === 'login' ? '登录 SuperMew' : '注册 SuperMew' }}</h2>
-                <p>登录后即可使用聊天和历史记录；管理员可管理文档知识库。</p>
+                <h2>{{ authMode === 'login' ? '登录面试助手' : '注册面试助手' }}</h2>
+                <p>登录后即可使用简历分析、JD 解读、模拟面试等功能。</p>
                 <div class="auth-form">
                     <input v-model="authForm.username" type="text" placeholder="用户名" />
                     <input v-model="authForm.password" type="password" placeholder="密码" />
@@ -76,8 +85,8 @@
             <!-- Settings Panel -->
             <div v-if="isAuthenticated && activeNav === 'settings'" class="settings-panel">
                 <div class="settings-header">
-                    <h2><i class="fas fa-cog"></i> 文档管理</h2>
-                    <p>上传文档进行向量化处理，支持 PDF 和 Word 、Excel 格式</p>
+                    <h2><i class="fas fa-cog"></i> 知识库管理</h2>
+                    <p>上传面试资料、八股文等文档，构建面试知识库（管理员）</p>
                 </div>
 
                 <div class="upload-section">
@@ -150,6 +159,244 @@
                 </div>
             </div>
 
+            <!-- Resume Management Panel -->
+            <div v-if="isAuthenticated && activeNav === 'resume'" class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-file-alt"></i> 简历管理</h2>
+                    <p>上传简历，AI 将自动解析并提取关键信息</p>
+                </div>
+
+                <div class="upload-section">
+                    <h3><i class="fas fa-upload"></i> 上传简历</h3>
+                    <div class="upload-area">
+                        <input type="file" ref="resumeFileInput" @change="handleResumeFileSelect" accept=".pdf,.doc,.docx" style="display: none" />
+                        <button @click="$refs.resumeFileInput.click()" class="upload-btn">
+                            <i class="fas fa-cloud-upload-alt"></i> 选择简历文件
+                        </button>
+                        <div v-if="selectedResumeFile" class="selected-file">
+                            <i class="fas fa-file"></i> {{ selectedResumeFile.name }}
+                            <button @click="uploadResume" class="btn-primary" :disabled="isUploadingResume">
+                                <i class="fas fa-upload"></i> {{ isUploadingResume ? '解析中...' : '上传并解析' }}
+                            </button>
+                        </div>
+                        <div v-if="resumeUploadProgress" class="upload-progress">{{ resumeUploadProgress }}</div>
+                    </div>
+                </div>
+
+                <div class="documents-section">
+                    <h3><i class="fas fa-list"></i> 我的简历</h3>
+                    <button @click="loadResumes" class="btn-secondary"><i class="fas fa-sync"></i> 刷新</button>
+                    <div v-if="resumesLoading" class="loading-indicator">加载中...</div>
+                    <div v-else-if="resumes.length === 0" class="empty-documents">
+                        <i class="fas fa-inbox"></i><p>暂无简历，请上传</p>
+                    </div>
+                    <div v-else class="documents-list">
+                        <div v-for="resume in resumes" :key="resume.id" class="document-item" @click="viewResumeDetail(resume.id)" style="cursor:pointer">
+                            <div class="document-info">
+                                <div class="document-icon"><i class="fas fa-file-alt"></i></div>
+                                <div class="document-details">
+                                    <div class="document-name">{{ resume.filename }}</div>
+                                    <div class="document-meta">
+                                        <span v-if="resume.structured_data?.name">姓名：{{ resume.structured_data.name }}</span>
+                                        <span v-if="resume.structured_data?.skills?.length">技能：{{ resume.structured_data.skills.slice(0, 3).join(', ') }}{{ resume.structured_data.skills.length > 3 ? '...' : '' }}</span>
+                                        <span>{{ new Date(resume.created_at).toLocaleDateString() }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button @click.stop="deleteResume(resume.id)" class="btn-danger" title="删除"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resume Detail Modal -->
+                <div v-if="resumeDetail" class="detail-panel" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h3><i class="fas fa-user"></i> {{ resumeDetail.structured_data?.name || '简历详情' }}</h3>
+                        <button @click="resumeDetail = null" class="close-btn"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div v-if="resumeDetail.structured_data?.summary" style="margin-bottom:12px; padding:10px; background:#e8f5e9; border-radius:8px;">
+                        <strong>摘要：</strong>{{ resumeDetail.structured_data.summary }}
+                    </div>
+                    <div v-if="resumeDetail.structured_data?.skills?.length" style="margin-bottom:12px;">
+                        <strong>技能标签：</strong>
+                        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                            <span v-for="skill in resumeDetail.structured_data.skills" :key="skill" style="padding:4px 10px; background:#e3f2fd; border-radius:12px; font-size:13px;">{{ skill }}</span>
+                        </div>
+                    </div>
+                    <div v-if="resumeDetail.structured_data?.education?.length" style="margin-bottom:12px;">
+                        <strong>教育经历：</strong>
+                        <div v-for="edu in resumeDetail.structured_data.education" :key="edu.school" style="margin-top:6px; padding:8px; background:#fff; border-radius:6px;">
+                            {{ edu.school }} — {{ edu.degree }} {{ edu.major }} ({{ edu.years }})
+                        </div>
+                    </div>
+                    <div v-if="resumeDetail.structured_data?.experience?.length" style="margin-bottom:12px;">
+                        <strong>工作经历：</strong>
+                        <div v-for="exp in resumeDetail.structured_data.experience" :key="exp.company" style="margin-top:6px; padding:8px; background:#fff; border-radius:6px;">
+                            <div><strong>{{ exp.company }}</strong> — {{ exp.title }} ({{ exp.duration }})</div>
+                            <div v-if="exp.description" style="color:#666; font-size:13px; margin-top:4px;">{{ exp.description }}</div>
+                        </div>
+                    </div>
+                    <div v-if="resumeDetail.structured_data?.projects?.length" style="margin-bottom:12px;">
+                        <strong>项目经历：</strong>
+                        <div v-for="proj in resumeDetail.structured_data.projects" :key="proj.name" style="margin-top:6px; padding:8px; background:#fff; border-radius:6px;">
+                            <div><strong>{{ proj.name }}</strong></div>
+                            <div v-if="proj.description" style="color:#666; font-size:13px;">{{ proj.description }}</div>
+                            <div v-if="proj.tech_stack?.length" style="margin-top:4px;">
+                                <span v-for="t in proj.tech_stack" :key="t" style="padding:2px 8px; background:#f3e5f5; border-radius:8px; font-size:12px; margin-right:4px;">{{ t }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- JD Analysis Panel -->
+            <div v-if="isAuthenticated && activeNav === 'jd'" class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-briefcase"></i> JD 分析</h2>
+                    <p>粘贴职位描述，AI 将自动提取核心要求和技能</p>
+                </div>
+
+                <div class="upload-section">
+                    <h3><i class="fas fa-plus"></i> 新建 JD</h3>
+                    <div style="display:flex; gap:10px; margin-bottom:10px;">
+                        <input v-model="jdForm.title" type="text" placeholder="职位名称（可选）" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px;" />
+                        <input v-model="jdForm.company" type="text" placeholder="公司名称（可选）" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px;" />
+                    </div>
+                    <textarea v-model="jdForm.jd_text" placeholder="粘贴职位描述内容..." rows="6" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; resize:vertical; font-family:inherit;"></textarea>
+                    <button @click="createJD" class="btn-primary" :disabled="isCreatingJD" style="margin-top:10px;">
+                        <i class="fas fa-magic"></i> {{ isCreatingJD ? '分析中...' : '分析 JD' }}
+                    </button>
+                    <div v-if="jdCreateProgress" class="upload-progress" style="margin-top:8px;">{{ jdCreateProgress }}</div>
+                </div>
+
+                <div class="documents-section">
+                    <h3><i class="fas fa-list"></i> 已分析的 JD</h3>
+                    <button @click="loadJDs" class="btn-secondary"><i class="fas fa-sync"></i> 刷新</button>
+                    <div v-if="jdsLoading" class="loading-indicator">加载中...</div>
+                    <div v-else-if="jds.length === 0" class="empty-documents">
+                        <i class="fas fa-inbox"></i><p>暂无 JD，请粘贴职位描述</p>
+                    </div>
+                    <div v-else class="documents-list">
+                        <div v-for="jd in jds" :key="jd.id" class="document-item" @click="viewJDDetail(jd.id)" style="cursor:pointer">
+                            <div class="document-info">
+                                <div class="document-icon"><i class="fas fa-briefcase"></i></div>
+                                <div class="document-details">
+                                    <div class="document-name">{{ jd.title }}</div>
+                                    <div class="document-meta">
+                                        <span>{{ jd.company || '未知公司' }}</span>
+                                        <span v-if="jd.structured_data?.skills?.length">核心技能：{{ jd.structured_data.skills.slice(0, 3).join(', ') }}</span>
+                                        <span>{{ new Date(jd.created_at).toLocaleDateString() }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button @click.stop="deleteJD(jd.id)" class="btn-danger" title="删除"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- JD Detail Modal -->
+                <div v-if="jdDetail" class="detail-panel" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h3><i class="fas fa-briefcase"></i> {{ jdDetail.title }}</h3>
+                        <button @click="jdDetail = null" class="close-btn"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div v-if="jdDetail.company" style="margin-bottom:8px;"><strong>公司：</strong>{{ jdDetail.company }}</div>
+                    <div v-if="jdDetail.structured_data?.salary_range" style="margin-bottom:8px;"><strong>薪资：</strong>{{ jdDetail.structured_data.salary_range }}</div>
+                    <div v-if="jdDetail.structured_data?.location" style="margin-bottom:12px;"><strong>地点：</strong>{{ jdDetail.structured_data.location }}</div>
+                    <div v-if="jdDetail.structured_data?.skills?.length" style="margin-bottom:12px;">
+                        <strong>核心技能：</strong>
+                        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                            <span v-for="s in jdDetail.structured_data.skills" :key="s" style="padding:4px 10px; background:#fff3e0; border-radius:12px; font-size:13px;">{{ s }}</span>
+                        </div>
+                    </div>
+                    <div v-if="jdDetail.structured_data?.requirements?.length" style="margin-bottom:12px;">
+                        <strong>硬性要求：</strong>
+                        <ul style="margin-top:6px; padding-left:20px;">
+                            <li v-for="r in jdDetail.structured_data.requirements" :key="r">{{ r }}</li>
+                        </ul>
+                    </div>
+                    <div v-if="jdDetail.structured_data?.responsibilities?.length" style="margin-bottom:12px;">
+                        <strong>工作职责：</strong>
+                        <ul style="margin-top:6px; padding-left:20px;">
+                            <li v-for="r in jdDetail.structured_data.responsibilities" :key="r">{{ r }}</li>
+                        </ul>
+                    </div>
+                    <div v-if="jdDetail.structured_data?.nice_to_have?.length" style="margin-bottom:12px;">
+                        <strong>加分项：</strong>
+                        <ul style="margin-top:6px; padding-left:20px;">
+                            <li v-for="n in jdDetail.structured_data.nice_to_have" :key="n">{{ n }}</li>
+                        </ul>
+                    </div>
+                    <div v-if="resumes.length > 0" style="margin-top:16px; padding-top:16px; border-top:1px solid #ddd;">
+                        <strong>匹配分析：</strong>
+                        <div style="display:flex; gap:10px; margin-top:8px; align-items:center;">
+                            <select v-model="matchResumeId" style="padding:8px; border:1px solid #ddd; border-radius:6px;">
+                                <option value="">选择简历</option>
+                                <option v-for="r in resumes" :key="r.id" :value="r.id">{{ r.filename }} {{ r.structured_data?.name ? '(' + r.structured_data.name + ')' : '' }}</option>
+                            </select>
+                            <button @click="runMatch" class="btn-primary" :disabled="!matchResumeId || isMatching">
+                                {{ isMatching ? '分析中...' : '开始匹配' }}
+                            </button>
+                        </div>
+                        <div v-if="matchResult" style="margin-top:12px; padding:12px; background:#fff; border-radius:8px; white-space:pre-wrap; font-size:14px;" v-html="parseMarkdown(matchResult)"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mock Interview Panel -->
+            <div v-if="isAuthenticated && activeNav === 'mockInterview'" class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-microphone"></i> 模拟面试</h2>
+                    <p>选择 JD 开始模拟面试，AI 将扮演面试官提问并评估你的回答</p>
+                </div>
+
+                <div v-if="jds.length === 0" class="empty-documents" style="padding:40px;">
+                    <i class="fas fa-briefcase"></i>
+                    <p>请先在「JD 分析」中添加职位描述</p>
+                    <button @click="handleJD" class="btn-primary" style="margin-top:10px;">前往 JD 分析</button>
+                </div>
+                <div v-else>
+                    <div class="upload-section">
+                        <h3><i class="fas fa-cog"></i> 面试设置</h3>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+                            <select v-model="mockInterview.jdId" style="flex:1; min-width:200px; padding:10px; border:1px solid #ddd; border-radius:8px;">
+                                <option value="">选择目标 JD</option>
+                                <option v-for="jd in jds" :key="jd.id" :value="jd.id">{{ jd.title }} — {{ jd.company || '未知公司' }}</option>
+                            </select>
+                            <select v-model="mockInterview.type" style="padding:10px; border:1px solid #ddd; border-radius:8px;">
+                                <option value="综合面">综合面</option>
+                                <option value="技术面">技术面</option>
+                                <option value="行为面">行为面</option>
+                            </select>
+                            <button @click="startMockInterview" class="btn-primary" :disabled="!mockInterview.jdId || mockInterview.loading">
+                                <i class="fas fa-play"></i> {{ mockInterview.loading ? '生成中...' : '开始面试' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Interview Questions -->
+                    <div v-if="mockInterview.questions" style="margin-top:20px;">
+                        <div v-html="parseMarkdown(mockInterview.questions)" style="padding:20px; background:#f8f9fa; border-radius:12px;"></div>
+
+                        <div style="margin-top:16px;">
+                            <h3><i class="fas fa-pen"></i> 我的回答</h3>
+                            <textarea v-model="mockInterview.answer" placeholder="输入你的回答..." rows="6" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; resize:vertical; font-family:inherit;"></textarea>
+                            <div style="display:flex; gap:10px; margin-top:10px;">
+                                <input v-model="mockInterview.questionText" type="text" placeholder="你回答的是哪道题？（粘贴题目）" style="flex:1; padding:10px; border:1px solid #ddd; border-radius:8px;" />
+                                <button @click="evaluateAnswer" class="btn-primary" :disabled="!mockInterview.answer || !mockInterview.questionText || mockInterview.evaluating">
+                                    <i class="fas fa-check"></i> {{ mockInterview.evaluating ? '评估中...' : '获取评估' }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="mockInterview.evaluation" style="margin-top:16px;">
+                            <h3><i class="fas fa-star"></i> 评估报告</h3>
+                            <div v-html="parseMarkdown(mockInterview.evaluation)" style="padding:20px; background:#f8f9fa; border-radius:12px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- History Sidebar -->
             <div v-if="isAuthenticated && showHistorySidebar" class="history-sidebar">
                 <div class="history-header">
@@ -193,7 +440,7 @@
                 <header class="chat-header">
                     <div class="header-info">
                         <div class="status-dot"></div>
-                        <span>喵喵在线中...</span>
+                        <span>面试教练在线中...</span>
                     </div>
                     <div class="header-actions">
                         <button class="icon-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
@@ -203,8 +450,13 @@
                 <div class="chat-container" ref="chatContainer">
                 <div v-if="messages.length === 0" class="welcome-screen">
                     <div class="big-avatar">🐱</div>
-                    <h3>你好呀！我是喵喵</h3>
-                    <p>我可以帮你写代码、回答问题，或者只是陪你聊天~ 喵！</p>
+                    <h3>你好！我是你的面试教练</h3>
+                    <p>我可以帮你分析简历、解读 JD、模拟面试、提供求职建议~</p>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:16px;">
+                        <button @click="handleResume" class="nav-btn" style="font-size:13px;"><i class="fas fa-file-alt"></i> 上传简历</button>
+                        <button @click="handleJD" class="nav-btn" style="font-size:13px;"><i class="fas fa-briefcase"></i> 分析 JD</button>
+                        <button @click="handleMockInterview" class="nav-btn" style="font-size:13px;"><i class="fas fa-microphone"></i> 模拟面试</button>
+                    </div>
                 </div>
                 
                 <!-- Messages -->
@@ -368,7 +620,7 @@
                         @compositionstart="handleCompositionStart"
                         @compositionend="handleCompositionEnd"
                         @input="autoResize"
-                        placeholder="和喵喵说点什么吧... (Shift+Enter 换行)" 
+                        placeholder="向面试教练提问... (Shift+Enter 换行)" 
                         rows="1"
                         ref="textarea"
                     ></textarea>

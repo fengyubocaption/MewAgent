@@ -20,6 +20,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
     sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
+    resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")
+    job_descriptions = relationship("JobDescription", back_populates="user", cascade="all, delete-orphan")
 
 
 class ChatSession(Base):
@@ -82,3 +84,37 @@ class LangMemMemory(Base):
     __table_args__ = (
         Index("ix_langmem_ns_key", "namespace", "key"),
     )
+
+
+class Resume(Base):
+    """用户简历表。"""
+
+    __tablename__ = "resumes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    structured_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    user = relationship("User", back_populates="resumes")
+
+
+class JobDescription(Base):
+    """职位描述表。"""
+
+    __tablename__ = "job_descriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    company: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    structured_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    user = relationship("User", back_populates="job_descriptions")
