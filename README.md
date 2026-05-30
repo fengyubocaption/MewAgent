@@ -1,6 +1,6 @@
-# MewAgent 项目说明
+# MewAgent — 面试求职助手
 
-RAG 聊天机器人，基于 FastAPI + Vue 3 (CDN)，集成 LangChain Agent、混合检索、知识图谱。
+基于 RAG 的面试求职助手，集成简历解析、JD 分析、匹配评估、模拟面试等功能。FastAPI + Vue 3 (CDN)，LangChain Agent + 混合检索 + 知识图谱。
 
 ## 本地部署
 
@@ -154,13 +154,14 @@ data/                   — bm25_state.json, 上传文档
 ```
 
 **核心能力：**
+- **面试助手**：简历解析、JD 分析、简历-JD 匹配评估、模拟面试（出题 + 评估）
 - **混合检索**：稠密向量 (BAAI/bge-m3) + BM25 稀疏向量 → Milvus RRF 融合 → Jina Rerank 精排
 - **Graph RAG**：Neo4j 知识图谱存储实体关系，LLM 抽取，向量+图谱并行融合检索，实体扩展+多跳推理
 - **三级分块 + Auto-merging**：L1/L2 父块存 PostgreSQL，L3 叶子块入 Milvus，检索时自动合并
 - **流式输出**：SSE + asyncio.Queue，跨线程 RAG 步骤实时推送
-- **LangMem 长期记忆**：用户画像、会话摘要、程序经验三类记忆，跨会话保留
+- **长期记忆**：四类记忆（用户偏好/反馈/项目/参考），跨会话保留
 - **RBAC 鉴权**：JWT Bearer Token，admin/user 角色权限隔离
-- **API 限流**：基于 Redis 固定窗口限流，支持用户/IP 维度，反向代理场景自动识别真实 IP
+- **API 限流**：基于 Redis 固定窗口限流，支持用户/IP 维度
 
 ## 目录详解
 
@@ -171,16 +172,17 @@ data/                   — bm25_state.json, 上传文档
 
 ### backend/db/
 - `database.py` — SQLAlchemy 引擎、会话工厂
-- `models.py` — ORM 模型（用户、会话、消息、父文档）
+- `models.py` — ORM 模型（用户、会话、消息、父文档、简历、JD）
 - `cache.py` — Redis JSON 缓存封装
 
 ### backend/middleware/
 - `rate_limit.py` — Redis 固定窗口限流，支持用户/IP 维度
 
 ### backend/agent/
-- `agent.py` — LangGraph Agent、会话存储
+- `agent.py` — LangGraph Agent、会话存储、面试教练人设
 - `tools.py` — 天气查询、知识库检索工具
-- `memory_manager.py` — LangMem 记忆管理
+- `interview_tools.py` — 面试工具：简历解析、JD 分析、匹配评估、模拟面试
+- `memory_manager.py` — 长期记忆管理
 - `memory_tools.py` — 记忆存储/检索工具
 
 ### backend/rag/
@@ -203,7 +205,7 @@ data/                   — bm25_state.json, 上传文档
 
 ### 聊天流程
 1. 用户输入 → `POST /chat/stream` (SSE)
-2. Agent 判断是否调用工具（知识库检索/天气查询）
+2. Agent 判断是否调用工具（知识库检索/简历解析/JD 分析/匹配评估/模拟面试）
 3. 若命中知识库 → RAG Pipeline 执行检索 → 实时推送步骤到前端
 4. Agent 流式生成回答（打字机效果）
 5. 消息持久化到 PostgreSQL，Redis 缓存热点会话
@@ -230,9 +232,17 @@ data/                   — bm25_state.json, 上传文档
 | `POST /chat/stream` | 流式聊天 (SSE) |
 | `GET /sessions` | 列出当前用户会话 |
 | `DELETE /sessions/{id}` | 删除会话 |
-| `GET /documents` | 列出文档 (admin) |
-| `POST /documents/upload` | 上传文档 (admin) |
-| `DELETE /documents/{filename}` | 删除文档 (admin) |
+| `POST /resume/upload` | 上传简历，LLM 自动解析 |
+| `GET /resume` | 简历列表 |
+| `GET /resume/{id}` | 简历详情 |
+| `DELETE /resume/{id}` | 删除简历 |
+| `POST /jd` | 创建 JD，LLM 自动分析 |
+| `GET /jd` | JD 列表 |
+| `GET /jd/{id}` | JD 详情 |
+| `DELETE /jd/{id}` | 删除 JD |
+| `GET /documents` | 列出知识库文档 (admin) |
+| `POST /documents/upload` | 上传知识库文档 (admin) |
+| `DELETE /documents/{filename}` | 删除知识库文档 (admin) |
 
 ## 环境变量
 
@@ -281,4 +291,4 @@ data/                   — bm25_state.json, 上传文档
 - **图谱**：Neo4j, 实体抽取, 实体扩展 (RELATED_TO), 多跳查询
 - **Embedding**：BAAI/bge-m3 + 自定义 BM25
 - **前端**：Vue 3 (CDN), marked, highlight.js
-- **记忆**：LangMem
+- **记忆**：PostgreSQL-based typed memory (user/feedback/project/reference)
