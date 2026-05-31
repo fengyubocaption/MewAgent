@@ -141,11 +141,11 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 backend/
 ├── app.py              — FastAPI 入口
-├── auth/               — 认证与 RBAC（JWT、密码哈希、角色守卫）
+├── core/               — 认证（JWT、密码哈希）、RBAC、限流、进度追踪
+├── routes/             — API 路由（薄 HTTP 层，调用 services）
+├── services/           — 业务逻辑（认证、文档、简历、JD、会话）
 ├── schemas/            — Pydantic 请求/响应模型
-├── routes/             — API 路由 (api.py, chat.py, sessions.py, documents.py, resume.py, jd.py)
 ├── db/                 — 数据库模型、Redis 缓存
-├── middleware/         — 中间件（限流）
 ├── agent/              — LangGraph Agent、工具、记忆管理
 ├── rag/                — RAG Pipeline、分块、向量检索
 ├── milvus/             — Milvus 客户端、向量写入、Embedding
@@ -167,8 +167,10 @@ data/                   — bm25_state.json, 上传文档
 
 ## 目录详解
 
-### backend/auth/
+### backend/core/
 - `security.py` — JWT 签发/验证、密码哈希（PBKDF2-SHA256）、角色守卫（get_current_user / require_admin）
+- `rate_limit.py` — Redis 固定窗口限流，支持用户/IP 维度
+- `progress.py` — 请求级检索进度回调，跨模块共享
 
 ### backend/routes/
 - `api.py` — 注册登录、用户信息接口
@@ -177,6 +179,13 @@ data/                   — bm25_state.json, 上传文档
 - `documents.py` — 知识库文档管理接口（admin）
 - `resume.py` — 简历上传/查询/删除接口
 - `jd.py` — JD 创建/查询/删除接口
+
+### backend/services/
+- `auth_service.py` — 注册/登录业务逻辑
+- `document_service.py` — 知识库文档上传/列表/删除
+- `resume_service.py` — 简历上传/解析/CRUD
+- `jd_service.py` — JD 创建/解析/CRUD
+- `session_service.py` — 会话列表/消息/删除
 
 ### backend/schemas/
 - `__init__.py` — 统一导出所有 Pydantic 模型
@@ -191,9 +200,6 @@ data/                   — bm25_state.json, 上传文档
 - `database.py` — SQLAlchemy 引擎、会话工厂
 - `models.py` — ORM 模型（用户、会话、消息、父文档、简历、JD）
 - `cache.py` — Redis JSON 缓存封装
-
-### backend/middleware/
-- `rate_limit.py` — Redis 固定窗口限流，支持用户/IP 维度
 
 ### backend/agent/
 - `agent.py` — LangGraph Agent、会话存储、面试教练人设
