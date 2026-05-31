@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from backend.middleware.rate_limit import rate_limit
-from backend.routes.security import get_current_user
+from backend.auth.security import get_current_user
 from backend.schemas import (
     ResumeDeleteResponse,
     ResumeDetailResponse,

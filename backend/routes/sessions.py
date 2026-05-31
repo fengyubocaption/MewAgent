@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from backend.agent.agent import storage
 from backend.middleware.rate_limit import rate_limit
-from backend.routes.security import get_current_user
+from backend.auth.security import get_current_user
 from backend.schemas import (
     MessageInfo,
     SessionDeleteResponse,

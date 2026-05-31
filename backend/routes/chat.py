@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.agent.agent import chat_with_agent_stream
 from backend.middleware.rate_limit import rate_limit
-from backend.routes.security import get_current_user
+from backend.auth.security import get_current_user
 from backend.schemas import ChatRequest
 from backend.db.models import User
 

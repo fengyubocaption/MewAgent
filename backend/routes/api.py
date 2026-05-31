@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from backend.middleware.rate_limit import rate_limit
 from backend.db.database import get_db
-from backend.routes.security import authenticate_user, create_access_token, get_current_user, get_password_hash, resolve_role
+from backend.auth.security import authenticate_user, create_access_token, get_current_user, get_password_hash, resolve_role
 from backend.db.models import User
 from backend.schemas import (
     AuthResponse,

@@ -141,7 +141,9 @@ uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 backend/
 ├── app.py              — FastAPI 入口
-├── routes/             — API 路由 (api.py, auth.py, schemas.py)
+├── auth/               — 认证与 RBAC（JWT、密码哈希、角色守卫）
+├── schemas/            — Pydantic 请求/响应模型
+├── routes/             — API 路由 (api.py, chat.py, sessions.py, documents.py, resume.py, jd.py)
 ├── db/                 — 数据库模型、Redis 缓存
 ├── middleware/         — 中间件（限流）
 ├── agent/              — LangGraph Agent、工具、记忆管理
@@ -165,10 +167,25 @@ data/                   — bm25_state.json, 上传文档
 
 ## 目录详解
 
+### backend/auth/
+- `security.py` — JWT 签发/验证、密码哈希（PBKDF2-SHA256）、角色守卫（get_current_user / require_admin）
+
 ### backend/routes/
-- `api.py` — 聊天、会话管理、文档管理接口
-- `auth.py` — 注册登录、JWT 鉴权、密码哈希
-- `schemas.py` — Pydantic 请求/响应模型
+- `api.py` — 注册登录、用户信息接口
+- `chat.py` — 流式聊天接口
+- `sessions.py` — 会话管理接口
+- `documents.py` — 知识库文档管理接口（admin）
+- `resume.py` — 简历上传/查询/删除接口
+- `jd.py` — JD 创建/查询/删除接口
+
+### backend/schemas/
+- `__init__.py` — 统一导出所有 Pydantic 模型
+- `auth.py` — 注册/登录/用户信息请求响应模型
+- `chat.py` — 聊天请求模型
+- `sessions.py` — 会话相关模型
+- `documents.py` — 文档管理模型
+- `resume.py` — 简历相关模型
+- `jd.py` — JD 相关模型
 
 ### backend/db/
 - `database.py` — SQLAlchemy 引擎、会话工厂
