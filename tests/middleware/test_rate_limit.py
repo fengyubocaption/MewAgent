@@ -1,7 +1,7 @@
 """限流模块单元测试。"""
 import pytest
 from unittest.mock import MagicMock
-from backend.middleware.rate_limit import get_client_ip
+from backend.core.rate_limit import get_client_ip
 
 
 class TestGetClientIp:

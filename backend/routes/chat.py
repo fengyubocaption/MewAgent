@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from backend.agent.agent import chat_with_agent_stream
-from backend.middleware.rate_limit import rate_limit
-from backend.auth.security import get_current_user
+from backend.core.rate_limit import rate_limit
+from backend.core.security import get_current_user
 from backend.schemas import ChatRequest
 from backend.db.models import User
 
