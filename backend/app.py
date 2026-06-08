@@ -25,6 +25,16 @@ def create_app() -> FastAPI:
         init_db()
         if GRAPH_ENABLED:
             init_neo4j_schema()
+        # 可选：启动 MinerU 文档解析服务
+        from backend.rag.mineru_parser import mineru_parser
+        if mineru_parser.enabled:
+            import threading
+            threading.Thread(target=mineru_parser.start_server, daemon=True).start()
+
+    @app.on_event("shutdown")
+    async def _shutdown_cleanup():
+        from backend.rag.mineru_parser import mineru_parser
+        mineru_parser.stop_server()
 
     app.add_middleware(
         CORSMiddleware,

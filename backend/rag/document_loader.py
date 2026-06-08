@@ -1,12 +1,21 @@
 """文档加载和分片服务"""
+import logging
 import os
 from typing import Dict, List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, UnstructuredExcelLoader
 
+logger = logging.getLogger(__name__)
+
 
 class DocumentLoader:
-    """文档加载和分片服务"""
+    """文档加载和分片服务
+
+    支持两种解析后端：
+    1. MinerU（可选）：高质量 OCR、表格结构保留、公式识别，通过 MINERU_ENABLED=true 启用
+    2. LangChain 基础 loader：PyPDFLoader / Docx2txtLoader / UnstructuredExcelLoader（默认）
+    MinerU 解析失败时自动回退到基础 loader。
+    """
 
     def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
         # 保留原有参数以兼容外部调用；默认启用三层滑动窗口分块。
@@ -119,11 +128,21 @@ class DocumentLoader:
 
     def load_document(self, file_path: str, filename: str) -> list[dict]:
         """
-        加载单个文档并分片
-        :param file_path: 文件路径
-        :param filename: 文件名
-        :return: 分片后的文档列表
+        加载单个文档并分片。
+        若 MinerU 已启用且支持该格式，优先使用 MinerU 解析（OCR、表格、公式）；
+        否则或失败时回退到 LangChain 基础 loader。
         """
+        # 尝试 MinerU 解析
+        from backend.rag.mineru_parser import mineru_parser
+        if mineru_parser.enabled and mineru_parser.is_supported(filename):
+            try:
+                return mineru_parser.load_as_chunks(
+                    file_path, filename, self._split_page_to_three_levels
+                )
+            except Exception as e:
+                logger.warning(f"MinerU 解析失败，回退到默认 loader: {e}")
+
+        # 回退到原有 loader
         file_lower = filename.lower()
 
         if file_lower.endswith(".pdf"):
