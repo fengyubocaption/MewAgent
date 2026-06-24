@@ -36,6 +36,9 @@ backend/
 
 frontend/               — Vue 3 SPA (index.html + script.js + style.css)
 data/                   — bm25_state.json, uploaded documents
+evals/                  — LangSmith and other evaluation scripts
+experiments/            — notebooks, learning examples, and scratch experiments
+tests/                  — automated tests
 ```
 
 Key components:

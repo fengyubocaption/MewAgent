@@ -153,6 +153,9 @@ backend/
 
 frontend/               — Vue 3 SPA (index.html + script.js + style.css)
 data/                   — bm25_state.json, 上传文档
+evals/                  — LangSmith 等评测脚本
+experiments/            — 学习示例、Notebook 和实验代码
+tests/                  — 自动化测试
 ```
 
 **核心能力：**
